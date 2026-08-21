@@ -44,8 +44,8 @@ match = re.search(pattern, url)
 
 if match:
     location = match.group(2)
-    if location == 'us':
-        location = location.upper()
+    if location == "us":
+        location = "global"
     agent_id = match.group(3)
     
     print("------------------------------------")
