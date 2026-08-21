@@ -6,7 +6,7 @@ steps:
       - '-c'
       - |
         pip install --no-cache-dir -r requirements.txt
-        python data_agent.py --project_id=$PROJECT_ID --file_path=agent_card.json
+        python data_agent_from_agent_card.py --project_id=$PROJECT_ID --file_path=agent_card.json
 
 options:
   logging: CLOUD_LOGGING_ONLY
