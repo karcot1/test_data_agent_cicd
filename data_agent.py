@@ -72,6 +72,27 @@ print(example_queries)
 print("------------------------------------")
 tables = params.get('table_info', [])
 
+parsed_example_queries = []
+
+for nl_prompt, query_data in example_queries.items():
+    # Handle list format: [SQL_query, *optional_params]
+    if isinstance(query_data, list) and len(query_data) > 0:
+        sql = query_data[0]
+        params_list = query_data[1:] if len(query_data) > 1 else []
+    else:
+        sql = str(query_data)
+        params_list = []
+
+    # Create the ExampleQuery object
+    parsed_example_queries.append(
+        geminidataanalytics.ExampleQuery(
+            natural_language_query=nl_prompt,
+            sql_query=sql,
+            parameters=params_list
+        )
+    )
+
+
 # Create BigQueryTableReference objects dynamically
 table_references = []
 for table in tables:
@@ -93,7 +114,7 @@ datasource_references = geminidataanalytics.DatasourceReferences(
 published_context = geminidataanalytics.Context(
     system_instruction=system_instructions,
     datasource_references=datasource_references,
-    example_queries=example_queries,
+    example_queries=parsed_example_queries,
     options=geminidataanalytics.ConversationOptions(
         analysis=geminidataanalytics.AnalysisOptions(
             python=geminidataanalytics.AnalysisOptions.Python(
