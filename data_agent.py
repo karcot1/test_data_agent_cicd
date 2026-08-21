@@ -19,11 +19,14 @@ args = parser.parse_args()
 # Load the JSON data from the file
 project_id = args.project_id
 file_path = args.file_path
+location = "global"
 
 print("------------------------------------")
 print(f"Project ID: {project_id}")
 print("------------------------------------")
 print(f"File Path: {file_path}")
+print("------------------------------------")
+print(f"Location: {location}")
 
 with open(file_path, 'r', encoding='utf-8') as file:
     data = json.load(file)
@@ -43,11 +46,8 @@ pattern = r"/projects/([^/]+)/locations/([^/]+)/dataAgents/([^/]+)"
 match = re.search(pattern, url)
 
 if match:
-    location = match.group(2)
     agent_id = match.group(3)
-    
-    print("------------------------------------")
-    print(f"location = '{location}'")
+
     print("------------------------------------")
     print(f"agent_id = '{agent_id}'")
 else:
