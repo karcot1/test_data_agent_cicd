@@ -1,0 +1,11 @@
+steps:
+  - id: 'create-data-agent' 
+    name: 'python:3.11-slim'
+    entrypoint: 'python'
+    args:
+      - 'main.py'
+      - '--project=$PROJECT_ID'
+      - '--file_path="agent_card.json"
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,157 @@
+{
+  "protocolVersion": "1.0",
+  "name": "test",
+  "description": "test agent",
+  "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
+  "preferredTransport": "INTERNAL_HTTP+JSON",
+  "defaultInputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "text/plain",
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "data-analysis",
+      "name": "Data Analysis",
+      "description": "Provides data analysis assistance",
+      "tags": [
+        "data analysis",
+        "data analytics",
+        "data science"
+      ],
+      "examples": [
+        "What is the total sales for the last 3 months?"
+      ],
+      "inputModes": [
+        "text/plain",
+        "application/json"
+      ],
+      "outputModes": [
+        "text/plain",
+        "application/json"
+      ]
+    }
+  ],
+  "additionalInterfaces": [
+    {
+      "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
+      "transport": "HTTP+JSON",
+      "tenant": "projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c"
+    },
+    {
+      "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
+      "transport": "GRPC",
+      "tenant": "projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c"
+    }
+  ],
+  "provider": {
+    "url": "",
+    "organization": ""
+  },
+  "version": "1.0",
+  "documentationUrl": "",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "extensions": [
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/a2ui_thoughts/v1",
+        "description": "Gemini Enterprise A2UI Thoughts extension",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.8",
+        "description": "Ability to render A2UI",
+        "required": false,
+        "params": {
+          "acceptsInlineCatalogs": false
+        }
+      },
+      {
+        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.9",
+        "description": "Ability to render A2UI",
+        "required": false,
+        "params": {
+          "acceptsInlineCatalogs": false
+        }
+      },
+      {
+        "uri": "https://cloud.google.com/bigquery/agent/extensions/sdui-chart/v1",
+        "description": "Ability to render SDUI charts",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/client-id/v1",
+        "description": "Google Data Analytics Client ID extension",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/datasource-references/v1",
+        "description": "Datasource references extension",
+        "required": false,
+        "params": {
+          "bq": {
+            "searchScope": {
+              "includeProjectIds": [],
+              "includeDatasetReferences": [
+                {
+                  "projectId": "",
+                  "datasetId": ""
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/authorizations/v1",
+        "description": "Google Gemini Enterprise authorization extension",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/full_history_when_stateless/v1",
+        "description": "Google Gemini Enterprise stateless extension",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/sse/v1",
+        "description": "Server-Sent Events (SSE) extension. Indicates that the agent supports SSE, prompting the calling system to add ?sse=true to the request URL.",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/stateless/v1",
+        "description": "GDA Stateless extension",
+        "required": false,
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/bq-dataset/v1",
+        "description": "BQ Dataset Information",
+        "required": false,
+        "params": {
+          "system_instructions": "Never query fields tagged with data policies without explicit permission. Always prompt the user for confirmation that they need to access sensitive information.",
+          "example_queries": {
+            "I need to send an email to my customer. Who should I send it to?": [
+              "SELECT id, email FROM `shared-data-project-493303.team_1_shared_dataset.team_1_auth_vw`"
+            ]
+          },
+          "table_info": [
+            "base-tables.team_1_base.team_1_table",
+            "shared-data-project-493303.team_3_shared_dataset.marketing_table",
+            "team-jj-493303.team_1_shared_dataset.customer_table"
+          ]
+        }
+      }
+    ]
+  },
+  "iconUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxMDAiPjxwYXRoIGQ9Ik02LjczLDEwLjgzdjIuNjNBNC45MSw0LjkxLDAsMCwwLDguNDQsMTUuMlYxMC44M1oiLz48cGF0aCBkPSJNOS44OSw4LjQxdjcuNTNBNy42Miw3LjYyLDAsMCwwLDExLDE2LDgsOCwwLDAsMCwxMiwxNlY4LjQxWiIvPjxwYXRoIGQ9Ik0xMy42NCwxMS44NnYzLjI5YTUsNSwwLDAsMCwxLjctMS44MlYxMS44NloiLz48cGF0aCBkPSJNMTcuNzQsMTYuMzJsLTEuNDIsMS40MmEuNDIuNDIsMCwwLDAsMCwuNmwzLjU0LDMuNTRhLjQyLjQyLDAsMCwwLC41OSwwbDEuNDMtMS40M2EuNDIuNDIsMCwwLDAsMC0uNTlsLTMuNTQtMy41NGEuNDIuNDIsMCwwLDAtLjYsMCIvPjxwYXRoIGQ9Ik0xMSwyYTksOSwwLDEsMCw5LDksOSw5LDAsMCwwLTktOW0wLDE1LjY5QTYuNjgsNi42OCwwLDEsMSwxNy42OSwxMSw2LjY4LDYuNjgsMCwwLDEsMTEsMTcuNjkiLz48L3N2Zz4="
+}
