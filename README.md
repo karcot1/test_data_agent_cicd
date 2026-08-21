@@ -21,7 +21,7 @@ The purpose of this code is to present a way to promote low/no code data agents 
 
 ## 🚀 Key Components
 
-### 1. `data_agent_from_agent_card.py`
+### 1. `data_agent_from_agent_card.py` (no-code deployment)
 Dynamically creates a Data Agent from an Agent Card JSON file (`agent_card.json`):
 - **Agent Name & ID**: Extracts agent name, creates a CI/CD-specific ID (e.g., `<name>_cicd`).
 - **System Instructions**: Extracts system prompt instructions from `BQ Dataset Information` extension.
@@ -29,7 +29,7 @@ Dynamically creates a Data Agent from an Agent Card JSON file (`agent_card.json`
 - **Golden Example Queries**: Parses natural language questions and corresponding SQL queries into `ExampleQuery` protobuf definitions.
 - **Data Agent Deployment**: Registers the agent with `geminidataanalytics.DataAgentServiceClient`.
 
-### 2. `data_agent_manual_creation.py`
+### 2. `data_agent_manual_creation.py` (low-code deployment)
 A reference script demonstrating how to hardcode and deploy a custom Data Agent (e.g. Google Trends analytical agent) with join instructions, column guidelines, and golden queries.
 
 ### 3. `cloudbuild.yaml`
