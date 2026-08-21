@@ -31,7 +31,7 @@ print(f"Location: {location}")
 with open(file_path, 'r', encoding='utf-8') as file:
     data = json.load(file)
 
-data_agent_id = f"{data.get('name')}_cicd"
+data_agent_id = f"{data.get('name')}_no_code_agent"
 
 print("------------------------------------")
 print(f"Agent Name: {data_agent_id}")

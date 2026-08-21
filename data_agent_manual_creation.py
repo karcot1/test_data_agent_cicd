@@ -3,9 +3,18 @@ from google.cloud import geminidataanalytics
 
 data_agent_client = geminidataanalytics.DataAgentServiceClient()
 
+# Create the parser
+parser = argparse.ArgumentParser(description="Process deployment parameters.")
+
+# Add arguments (both positional and named flags are supported)
+parser.add_argument("--project_id", required=True, help="The GCP project ID")
+
+# Parse arguments
+args = parser.parse_args()
+
+project_id = args.project_id
 location = "global"
-billing_project = os.environ.get('DEVSHELL_PROJECT_ID')
-data_agent_id = "google_trends_analytics_agent"
+data_agent_id = "test_low_code_agent"
 
 system_instruction = """
 system_instruction:
@@ -92,7 +101,7 @@ data_agent = geminidataanalytics.DataAgent(
 
 # Create the agent
 data_agent_client.create_data_agent(request=geminidataanalytics.CreateDataAgentRequest(
-    parent=f"projects/{billing_project}/locations/{location}",
+    parent=f"projects/{project_id}/locations/{location}",
     data_agent_id=data_agent_id,
     data_agent=data_agent,
 ))

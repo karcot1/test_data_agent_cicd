@@ -1,5 +1,14 @@
 steps:
-  - id: 'create-data-agent' 
+  - id: 'create-low-code-agent'
+    name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir -r requirements.txt
+        python data_agent_manual_creation.py --project_id=$PROJECT_ID
+        
+  - id: 'create-no-code-agent' 
     name: 'python:3.11-slim'
     entrypoint: 'bash'
     args:
