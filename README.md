@@ -1,6 +1,8 @@
 # BigQuery Data Agent CI/CD Deployment
 
-This repository provides CI/CD pipelines and Python scripts for automatically provisioning and configuring **Gemini Data Agents** (Conversational Analytics Agents) on Google Cloud using Cloud Build and the `google-cloud-geminidataanalytics` SDK.
+This repository provides CI/CD pipelines and Python scripts for automatically provisioning and configuring **Gemini Data Agents** (Conversational Analytics Agents) on Google Cloud using Cloud Build and the `google-cloud-geminidataanalytics` SDK. The sample code contains two use cases: 1) a low-code agent deployment example (agents are built out using natural language prompts and SQL, but wrapped and deployed with python SDK) and 2) a no-code agent deployment example (agent is created entirely in BigQuery, and the auto-generated A2A card is then used to extract and re-create the agent in other projects. 
+
+The purpose of this code is to present a way to promote low/no code data agents across environments (dev/stage/prod) in an automated fashion and integrate wtih CI/CD pipelines. 
 
 ---
 
