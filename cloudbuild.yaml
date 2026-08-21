@@ -3,8 +3,8 @@ steps:
     name: 'python:3.11-slim'
     entrypoint: 'python'
     args:
-      - 'main.py'
-      - '--project=$PROJECT_ID'
+      - 'data_agent.py'
+      - '--project_id=$PROJECT_ID'
       - '--file_path=agent_card.json'
 
 options:
