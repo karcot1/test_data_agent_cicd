@@ -86,7 +86,7 @@ for nl_prompt, query_data in example_queries.items():
     # Create the ExampleQuery object
     parsed_example_queries.append(
         geminidataanalytics.ExampleQuery(
-            natural_language_query=nl_prompt,
+            natural_language_question=nl_prompt,
             sql_query=sql,
             parameters=params_list
         )
