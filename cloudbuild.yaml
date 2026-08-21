@@ -5,7 +5,7 @@ steps:
     args:
       - 'main.py'
       - '--project=$PROJECT_ID'
-      - '--file_path="agent_card.json"
+      - '--file_path=agent_card.json'
 
 options:
   logging: CLOUD_LOGGING_ONLY
