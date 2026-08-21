@@ -2,10 +2,9 @@ import os
 import json
 import re
 import argparse
+from google.cloud import geminidataanalytics
 
-# from google.cloud import geminidataanalytics
-
-# data_agent_client = geminidataanalytics.DataAgentServiceClient()
+data_agent_client = geminidataanalytics.DataAgentServiceClient()
 
 # Create the parser
 parser = argparse.ArgumentParser(description="Process deployment parameters.")
@@ -73,46 +72,46 @@ print(example_queries)
 print("------------------------------------")
 tables = params.get('table_info', [])
 
-# # Create BigQueryTableReference objects dynamically
-# table_references = []
-# for table in tables:
-#     proj_id, ds_id, tbl_id = table.split('.', 2)
-#     table_references.append(
-#         geminidataanalytics.BigQueryTableReference(
-#             project_id=proj_id,
-#             dataset_id=ds_id,
-#             table_id=tbl_id,
-#         )
-#     )
+# Create BigQueryTableReference objects dynamically
+table_references = []
+for table in tables:
+    proj_id, ds_id, tbl_id = table.split('.', 2)
+    table_references.append(
+        geminidataanalytics.BigQueryTableReference(
+            project_id=proj_id,
+            dataset_id=ds_id,
+            table_id=tbl_id,
+        )
+    )
 
-# # BigQuery table data sources
-# datasource_references = geminidataanalytics.DatasourceReferences(
-#     bq=geminidataanalytics.BigQueryTableReferences(table_references=table_references)
-# )
+# BigQuery table data sources
+datasource_references = geminidataanalytics.DatasourceReferences(
+    bq=geminidataanalytics.BigQueryTableReferences(table_references=table_references)
+)
 
-# # Context setup for stateful chat
-# published_context = geminidataanalytics.Context(
-#     system_instruction=system_instructions,
-#     datasource_references=datasource_references,
-#     example_queries=example_queries,
-#     options=geminidataanalytics.ConversationOptions(
-#         analysis=geminidataanalytics.AnalysisOptions(
-#             python=geminidataanalytics.AnalysisOptions.Python(
-#                 enabled=False
-#             )
-#         )
-#     ),
-# )
+# Context setup for stateful chat
+published_context = geminidataanalytics.Context(
+    system_instruction=system_instructions,
+    datasource_references=datasource_references,
+    example_queries=example_queries,
+    options=geminidataanalytics.ConversationOptions(
+        analysis=geminidataanalytics.AnalysisOptions(
+            python=geminidataanalytics.AnalysisOptions.Python(
+                enabled=False
+            )
+        )
+    ),
+)
 
-# data_agent = geminidataanalytics.DataAgent(
-#     data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
-#         published_context=published_context
-#     ),
-# )
+data_agent = geminidataanalytics.DataAgent(
+    data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
+        published_context=published_context
+    ),
+)
 
-# # Create the agent
-# data_agent_client.create_data_agent(request=geminidataanalytics.CreateDataAgentRequest(
-#     parent=f"projects/{project_id}/locations/{location}",
-#     data_agent_id=data_agent_id,
-#     data_agent=data_agent,
-# ))
+# Create the agent
+data_agent_client.create_data_agent(request=geminidataanalytics.CreateDataAgentRequest(
+    parent=f"projects/{project_id}/locations/{location}",
+    data_agent_id=data_agent_id,
+    data_agent=data_agent,
+))
