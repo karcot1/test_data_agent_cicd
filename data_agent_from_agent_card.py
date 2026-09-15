@@ -2,7 +2,9 @@ import os
 import json
 import re
 import argparse
+from google.api_core import exceptions
 from google.cloud import geminidataanalytics
+from google.protobuf import field_mask_pb2
 import google.auth
 import google.auth.transport.requests
 import httpx
@@ -134,6 +136,7 @@ published_context = geminidataanalytics.Context(
 )
 
 data_agent = geminidataanalytics.DataAgent(
+    name=f"projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}",
     data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
         published_context=published_context
     ),
@@ -150,7 +153,7 @@ try:
     )
     print("Created DataAgent:", operation.result().name)
 
-except Exception.AlreadyExists:
+except exceptions.AlreadyExists:
     print(f"DataAgent '{data_agent_id}' already exists. Updating in-place...")
     operation = data_agent_client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(
