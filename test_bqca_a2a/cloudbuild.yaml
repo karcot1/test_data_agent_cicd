@@ -1,0 +1,57 @@
+steps:
+# Docker Build
+- id: 'build'
+  name: 'gcr.io/cloud-builders/docker'
+  dir: 'restaurant_agent'
+  args: ['build', '-t', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/restaurant_agent:$SHORT_SHA', '.']
+
+#Docker Push
+- id: 'push'
+  name: 'gcr.io/cloud-builders/docker'
+  dir: 'restaurant_agent'
+  args: ['push', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/restaurant_agent:$SHORT_SHA']
+
+#Agent Deploy with Terraform
+- id: 'tf-init'
+  name: 'hashicorp/terraform:1.7.0'
+  dir: 'terraform'
+  entrypoint: 'terraform'
+  args:
+    - 'init' 
+    - '-no-color'
+    - '-var=project_id=${_PROJECT_ID}'
+    - '-var=location=${_LOCATION}'
+    - '-var=image_tag=${SHORT_SHA}'
+    - '-var=agent_name=restaurant_agent'
+    - '-var=agent_display_name=Restaurant Agent'
+    - '-var=agent_description=BYOC Agent for learning about food at restaurants'
+    - '-var=agent_framework=google-adk'
+
+- id: 'tf-plan'
+  name: 'hashicorp/terraform:1.7.0'
+  dir: 'terraform'
+  entrypoint: 'terraform'
+  args:
+    - 'plan'
+    - '-no-color' 
+    - '-out=tfplan'
+    - '-var=project_id=${_PROJECT_ID}'
+    - '-var=location=${_LOCATION}'
+    - '-var=image_tag=${SHORT_SHA}'
+    - '-var=agent_name=restaurant_agent'
+    - '-var=agent_display_name=Restaurant Agent'
+    - '-var=agent_description=BYOC Agent for learning about food at restaurants'
+    - '-var=agent_framework=google-adk'
+
+- id: 'tf-apply'
+  name: 'hashicorp/terraform:1.7.0'
+  dir: 'terraform'
+  entrypoint: 'terraform'
+  args:
+    - 'apply'
+    - '-auto-approve'
+    - '-no-color'
+    - 'tfplan'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
