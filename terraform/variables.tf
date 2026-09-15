@@ -6,7 +6,7 @@ variable "project_id" {
 variable "location" {
   type        = string
   description = "The region to deploy the reasoning engine"
-  default     = "global"
+  default     = "us-central1"
 }
 
 variable "repository_name" {
