@@ -3,8 +3,17 @@ import json
 import re
 import argparse
 from google.cloud import geminidataanalytics
+import google.auth
+import google.auth.transport.requests
+import httpx
 
 data_agent_client = geminidataanalytics.DataAgentServiceClient()
+
+credentials, project_id = google.auth.default(
+    scopes=["https://googleapis.com"]
+)
+auth_request = google.auth.transport.requests.Request()
+credentials.refresh(auth_request)
 
 # Create the parser
 parser = argparse.ArgumentParser(description="Process deployment parameters.")
