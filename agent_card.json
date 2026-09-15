@@ -1,9 +1,9 @@
 {
-  "protocolVersion": "1.0",
-  "name": "test",
-  "description": "test agent",
-  "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
-  "preferredTransport": "HTTP_JSON",
+  "protocolVersion": "0.3",
+  "name": "data_community_monthly_demo",
+  "description": "A test agent to demonstrate BQCA CI/CD",
+  "url": "https://geminidataanalytics.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/global/dataAgents/agent_7d1696e6-41a6-4129-a218-be1a575ccbb4",
+  "preferredTransport": "INTERNAL_HTTP+JSON",
   "defaultInputModes": [
     "text/plain",
     "application/json"
@@ -35,18 +35,7 @@
       ]
     }
   ],
-  "additionalInterfaces": [
-    {
-      "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
-      "transport": "HTTP+JSON",
-      "tenant": "projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c"
-    },
-    {
-      "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
-      "transport": "GRPC",
-      "tenant": "projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c"
-    }
-  ],
+  "additionalInterfaces": [],
   "provider": {
     "url": "",
     "organization": ""
@@ -138,16 +127,9 @@
         "description": "BQ Dataset Information",
         "required": false,
         "params": {
-          "system_instructions": "Never query fields tagged with data policies without explicit permission. Always prompt the user for confirmation that they need to access sensitive information.",
-          "example_queries": {
-            "I need to send an email to my customer. Who should I send it to?": [
-              "SELECT id, email FROM `shared-data-project-493303.team_1_shared_dataset.team_1_auth_vw`"
-            ]
-          },
+          "system_instructions": "Provide answers to data-related questions that users may ask.",
           "table_info": [
-            "base-tables.team_1_base.team_1_table",
-            "shared-data-project-493303.team_3_shared_dataset.marketing_table",
-            "team-jj-493303.team_1_shared_dataset.customer_table"
+            "gapinc-sandbox.query_costcontrol_test.test_table"
           ]
         }
       }
