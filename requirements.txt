@@ -1,1 +1,4 @@
 google-cloud-geminidataanalytics
+a2a-sdk
+google-auth
+httpx
