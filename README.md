@@ -145,26 +145,24 @@ Below is a reference of common errors encountered when deploying BigQuery Conver
 
 ---
 
-## 🛠️ Usage
+## 🛠️ Usage (Deploying via Cloud Build Triggers)
 
-### 1. Deploy / Update the Data Agent & Register in Agent Registry
-```bash
-# Authenticate with Google Cloud
-gcloud auth application-default login
+Deployments are automated by connecting your GitHub repository to **Google Cloud Build** and configuring Cloud Build Triggers pointing to the respective `cloudbuild.yaml` files in this repository.
 
-# Run the no-code Agent Card deployment & Agent Registry registration script
-python3 data_agent_from_agent_card.py
-```
+### 1. Recommended Cloud Build Triggers
 
-### 2. Deploy the Vertex AI Reasoning Engine Orchestrator (`test_bqca_a2a`)
-Trigger the Cloud Build pipeline to build the container image and apply Terraform:
-```bash
-gcloud builds submit --config=test_bqca_a2a/cloudbuild.yaml \
-    --substitutions=_PROJECT_ID="gapinc-sandbox",_LOCATION="us-central1"
-```
+Create the following triggers in the Google Cloud Console under **Cloud Build > Triggers**:
 
-Or to quickly update an existing Reasoning Engine with code changes in `test_bqca_a2a/`:
-```bash
-gcloud builds submit --config=test_bqca_a2a/update_agent_cloudbuild.yaml
-```
+| Example Trigger Name | Cloud Build Config File Location | Required User-Defined Substitutions | Description |
+| :--- | :--- | :--- | :--- |
+| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Runs `data_agent_manual_creation.py` and `data_agent_from_agent_card.py` to create/update the BigQuery Conversational Analytics Data Agent and register its live A2A card in Google Cloud Agent Registry (`global` and `us-central1`). |
+| **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `gapinc-sandbox`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
+| **`update-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/update_agent_cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID` and `$SHORT_SHA`)* | Fast container-only update pipeline: builds and pushes a new container image for `test_bqca_a2a` and runs `update_agent_deployment.sh` to directly `PATCH` the existing Reasoning Engine deployment without running Terraform. |
+
+### 2. Configuring Substitution Variables
+
+When configuring the **`deploy-bqca-a2a-reasoning-engine`** trigger (pointing to `/test_bqca_a2a/cloudbuild.yaml`), ensure you add the following **Substitution Variables** in the Cloud Build Trigger configuration UI:
+
+- **`_PROJECT_ID`**: Your target Google Cloud project ID (e.g., `gapinc-sandbox`). Passed to Terraform (`-var=project_id=${_PROJECT_ID}`).
+- **`_LOCATION`**: The target regional location for the Vertex AI Reasoning Engine deployment (e.g., `us-central1`). Passed to Terraform (`-var=location=${_LOCATION}`). *(Note: Vertex AI Reasoning Engine requires a regional location such as `us-central1` and does not support `global`.)*
 
