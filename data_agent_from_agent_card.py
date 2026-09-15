@@ -137,6 +137,8 @@ published_context = geminidataanalytics.Context(
 
 data_agent = geminidataanalytics.DataAgent(
     name=f"projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}",
+    display_name=f"{data_agent_id}",
+    description=data.get("description") or "Enterprise data agent for natural language BigQuery reporting.",
     data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
         published_context=published_context
     ),
@@ -158,7 +160,9 @@ except exceptions.AlreadyExists:
     operation = data_agent_client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(
             data_agent=data_agent,
-            update_mask=field_mask_pb2.FieldMask(paths=["data_analytics_agent"]),
+            update_mask=field_mask_pb2.FieldMask(
+                paths=["display_name", "description", "data_analytics_agent"]
+            ),
         )
     )
     print("Updated DataAgent:", operation.result().name)
@@ -176,27 +180,40 @@ card_response = httpx.get(A2A_CARD_URL, headers=headers, timeout=60.0)
 card_response.raise_for_status()
 agent_card_json_data = card_response.json()
 
+# Ensure required A2A Agent Card fields are populated for Agent Registry indexing
+agent_card_json_data["name"] = agent_card_json_data.get("name") or data_agent_id
+agent_card_json_data["description"] = (
+    agent_card_json_data.get("description")
+    or data.get("description")
+    or "Enterprise data agent for natural language BigQuery reporting."
+)
+agent_card_json_data["version"] = agent_card_json_data.get("version") or "1.0.0"
+agent_card_json_data["url"] = (
+    agent_card_json_data.get("url")
+    or f"https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}"
+)
+
 # 4. Format payload for Google Cloud Agent Registry
 service_id = data_agent_id.replace("_", "-")
 registry_payload = {
     "displayName": f"{data_agent_id} [BigQuery Conversational Analytics Agent]",
-    "description": "Enterprise data agent for natural language BigQuery reporting.",
+    "description": agent_card_json_data["description"],
     "agentSpec": {
         "type": "A2A_AGENT_CARD",
         "content": agent_card_json_data,
     },
 }
 
-# 5. Push directly into the Agent Registry (create or update via PATCH on 409)
-create_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{location}/services?serviceId={service_id}"
-patch_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{location}/services/{service_id}?updateMask=agentSpec,displayName,description"
+# 5. Push into Agent Registry in both 'global' and 'us-central1' so it is visible regardless of the Console Region filter
+for reg_location in ["global"]:
+    create_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services?serviceId={service_id}"
+    patch_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services/{service_id}?updateMask=agentSpec,displayName,description"
 
-registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
-if registry_response.status_code == 409:
-    print(f"Agent Registry service '{service_id}' already exists. Updating via PATCH...")
-    registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
+    registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
+    if registry_response.status_code == 409:
+        print(f"Agent Registry service '{service_id}' in '{reg_location}' already exists. Updating via PATCH...")
+        registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
 
-registry_response.raise_for_status()
-
-print("Successfully registered agent in Agent Registry! Server response:")
-print(registry_response.json())
+    registry_response.raise_for_status()
+    print(f"Successfully registered agent in Agent Registry ({reg_location}):")
+    print(registry_response.json())
