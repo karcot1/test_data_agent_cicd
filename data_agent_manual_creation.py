@@ -101,8 +101,21 @@ data_agent = geminidataanalytics.DataAgent(
 )
 
 # Create the agent
-data_agent_client.create_data_agent(request=geminidataanalytics.CreateDataAgentRequest(
-    parent=f"projects/{project_id}/locations/{location}",
-    data_agent_id=data_agent_id,
-    data_agent=data_agent,
-))
+try:
+    operation = data_agent_client.create_data_agent(
+        request=geminidataanalytics.CreateDataAgentRequest(
+            parent=f"projects/{project_id}/locations/{location}",
+            data_agent_id=data_agent_id,
+            data_agent=data_agent,
+        )
+    )
+    print("Created DataAgent:", operation.result().name)
+except exceptions.AlreadyExists:
+    print(f"DataAgent '{data_agent_id}' already exists. Updating in-place...")
+    operation = data_agent_client.update_data_agent(
+        request=geminidataanalytics.UpdateDataAgentRequest(
+            data_agent=data_agent,
+            update_mask=field_mask_pb2.FieldMask(paths=["data_analytics_agent"]),
+        )
+    )
+    print("Updated DataAgent:", operation.result().name)
