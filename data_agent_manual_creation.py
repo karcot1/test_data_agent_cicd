@@ -15,7 +15,7 @@ args = parser.parse_args()
 
 project_id = args.project_id
 location = "global"
-data_agent_id = "test_low_code_agent_v3"
+data_agent_id = "test_low_code_agent"
 
 system_instruction = """
 system_instruction:
@@ -110,7 +110,8 @@ try:
         )
     )
     print("Created DataAgent:", operation.result().name)
-except exceptions.AlreadyExists:
+
+except Exception.AlreadyExists:
     print(f"DataAgent '{data_agent_id}' already exists. Updating in-place...")
     operation = data_agent_client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(

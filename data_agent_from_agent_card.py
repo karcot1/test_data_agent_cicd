@@ -149,7 +149,8 @@ try:
         )
     )
     print("Created DataAgent:", operation.result().name)
-except exceptions.AlreadyExists:
+
+except Exception.AlreadyExists:
     print(f"DataAgent '{data_agent_id}' already exists. Updating in-place...")
     operation = data_agent_client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(
