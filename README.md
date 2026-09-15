@@ -66,7 +66,7 @@ Contains a containerized Google ADK agent (`test_bqca_a2a_agent`) deployed as a 
 ## 📋 Prerequisites & Required IAM Permissions
 
 ### 1. Enable Required Google Cloud APIs
-Ensure the following APIs are enabled in your host project (e.g., `gapinc-sandbox`):
+Ensure the following APIs are enabled in your host project (e.g., `<YOUR_PROJECT_ID>`):
 ```bash
 gcloud services enable \
     geminidataanalytics.googleapis.com \
@@ -84,19 +84,19 @@ Because the Reasoning Engine service agent (`service-<PROJECT_NUMBER>@gcp-sa-aip
 
 | Principal (Service Account / Identity) | Required IAM Role | Target Project / Resource | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/geminidataanalytics.admin`<br>*(or `roles/geminidataanalytics.dataAgentUser`)* | Host Project<br>*(e.g., `gapinc-sandbox`)* | Grants `geminidataanalytics.dataAgents.chat` permission to invoke `a2a.v1.A2AService.SendMessage` on the Data Agent. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/cloudaicompanion.user` | Host Project<br>*(e.g., `gapinc-sandbox`)* | **Critical:** Required for `DataChatService.ChatInternal` inside Gemini Data Analytics when processing natural language queries. Without this, A2A calls fail with `403 Forbidden`. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/serviceusage.serviceUsageConsumer` | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows the Google-managed Reasoning Engine service agent (`@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) to bill API quota to the host project via the `x-goog-user-project` header. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/agentregistry.admin`<br>*(or `roles/agentregistry.viewer`)* | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows `AgentRegistry.get_remote_a2a_agent()` to fetch the registered A2A Agent Card during container startup. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/aiplatform.user` | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows the orchestrator agent (`root_agent`) to invoke Vertex AI Gemini models (`gemini-3.1-flash-lite`, etc.). |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/artifactregistry.reader` | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows Vertex AI Reasoning Engine to pull the BYOC container image from Artifact Registry. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.jobUser`<br>`roles/bigquery.dataViewer` | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows Gemini Data Analytics to run BigQuery SQL jobs and read tables in the host project on behalf of the Reasoning Engine. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/geminidataanalytics.admin`<br>*(or `roles/geminidataanalytics.dataAgentUser`)* | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Grants `geminidataanalytics.dataAgents.chat` permission to invoke `a2a.v1.A2AService.SendMessage` on the Data Agent. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/cloudaicompanion.user` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | **Critical:** Required for `DataChatService.ChatInternal` inside Gemini Data Analytics when processing natural language queries. Without this, A2A calls fail with `403 Forbidden`. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/serviceusage.serviceUsageConsumer` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows the Google-managed Reasoning Engine service agent (`@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) to bill API quota to the host project via the `x-goog-user-project` header. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/agentregistry.admin`<br>*(or `roles/agentregistry.viewer`)* | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows `AgentRegistry.get_remote_a2a_agent()` to fetch the registered A2A Agent Card during container startup. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/aiplatform.user` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows the orchestrator agent (`root_agent`) to invoke Vertex AI Gemini models (`gemini-3.1-flash-lite`, etc.). |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/artifactregistry.reader` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows Vertex AI Reasoning Engine to pull the BYOC container image from Artifact Registry. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.jobUser`<br>`roles/bigquery.dataViewer` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows Gemini Data Analytics to run BigQuery SQL jobs and read tables in the host project on behalf of the Reasoning Engine. |
 | **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.dataViewer` | **All External BigQuery Table Projects**<br>*(e.g., `base-tables`, `shared-data-project-493303`, `team-jj-493303`)* | **Critical:** Allows Gemini Data Analytics to retrieve table metadata and query tables located in external projects referenced in `agent_card.json`. |
-| **Cloud Build / Deployment SA**<br>`<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com` & `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com` | `roles/geminidataanalytics.admin`<br>`roles/agentregistry.admin`<br>`roles/aiplatform.admin`<br>`roles/artifactregistry.writer`<br>`roles/storage.admin` | Host Project<br>*(e.g., `gapinc-sandbox`)* | Allows CI/CD pipelines to create/update Data Agents, register services in Agent Registry, push Docker images, and deploy Reasoning Engines via Terraform. |
+| **Cloud Build / Deployment SA**<br>`<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com` & `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com` | `roles/geminidataanalytics.admin`<br>`roles/agentregistry.admin`<br>`roles/aiplatform.admin`<br>`roles/artifactregistry.writer`<br>`roles/storage.admin` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows CI/CD pipelines to create/update Data Agents, register services in Agent Registry, push Docker images, and deploy Reasoning Engines via Terraform. |
 
 #### Quick CLI Commands to Grant Reasoning Engine Permissions
 ```bash
-PROJECT_ID="gapinc-sandbox"
+PROJECT_ID="<YOUR_PROJECT_ID>"
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 RE_SA="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
 
@@ -156,13 +156,13 @@ Create the following triggers in the Google Cloud Console under **Cloud Build > 
 | Example Trigger Name | Cloud Build Config File Location | Required User-Defined Substitutions | Description |
 | :--- | :--- | :--- | :--- |
 | **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Runs `data_agent_manual_creation.py` and `data_agent_from_agent_card.py` to create/update the BigQuery Conversational Analytics Data Agent and register its live A2A card in Google Cloud Agent Registry (`global` and `us-central1`). |
-| **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `gapinc-sandbox`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
+| **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `<YOUR_PROJECT_ID>`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
 | **`update-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/update_agent_cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID` and `$SHORT_SHA`)* | Fast container-only update pipeline: builds and pushes a new container image for `test_bqca_a2a` and runs `update_agent_deployment.sh` to directly `PATCH` the existing Reasoning Engine deployment without running Terraform. |
 
 ### 2. Configuring Substitution Variables
 
 When configuring the **`deploy-bqca-a2a-reasoning-engine`** trigger (pointing to `/test_bqca_a2a/cloudbuild.yaml`), ensure you add the following **Substitution Variables** in the Cloud Build Trigger configuration UI:
 
-- **`_PROJECT_ID`**: Your target Google Cloud project ID (e.g., `gapinc-sandbox`). Passed to Terraform (`-var=project_id=${_PROJECT_ID}`).
+- **`_PROJECT_ID`**: Your target Google Cloud project ID (e.g., `<YOUR_PROJECT_ID>`). Passed to Terraform (`-var=project_id=${_PROJECT_ID}`).
 - **`_LOCATION`**: The target regional location for the Vertex AI Reasoning Engine deployment (e.g., `us-central1`). Passed to Terraform (`-var=location=${_LOCATION}`). *(Note: Vertex AI Reasoning Engine requires a regional location such as `us-central1` and does not support `global`.)*
 

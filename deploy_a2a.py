@@ -7,7 +7,9 @@ from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.utils import TransportProtocol
 from a2a.types import SendMessageRequest, Message, Part, Role
 
-PROJECT  = "gapinc-sandbox"
+import os
+_, _default_project = default()
+PROJECT  = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("PROJECT_ID") or _default_project
 LOCATION = "global"          # must match the endpoint host below
 AGENT_ID = "test_no_code_agent"
 

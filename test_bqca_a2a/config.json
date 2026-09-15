@@ -1,5 +1,5 @@
 {
-    "PROJECT_ID": "gapinc-sandbox",
+    "PROJECT_ID": "<YOUR_PROJECT_ID>",
     "LOCATION": "us-central1",
     "AGENT_REGISTRY_LOCATION": "global",
     "MODEL": "gemini-3.1-flash-lite",

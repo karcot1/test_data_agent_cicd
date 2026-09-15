@@ -1,6 +1,6 @@
 # 1. Grab your authenticated token
 ACCESS_TOKEN=$(gcloud auth print-access-token)
-PROJECT_ID="gapinc-sandbox"
+PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project)}"
 LOCATION="us-central1"
 ENGINE_ID="911096566461235200"
 TAG=${TAG}

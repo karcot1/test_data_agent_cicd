@@ -2,7 +2,7 @@
   "protocolVersion": "1.0",
   "name": "test",
   "description": "test agent",
-  "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
+  "url": "https://geminidataanalytics.us.rep.googleapis.com/v1beta/a2a/projects/[PROJECT_ID]/locations/us/dataAgents/agent_f1a6fa0a-6b31-4155-97e5-5c368a62fc7c",
   "preferredTransport": "HTTP_JSON",
   "defaultInputModes": [
     "text/plain",

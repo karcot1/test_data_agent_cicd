@@ -20,12 +20,26 @@ config_path = "test_bqca_a2a/config.json" if os.path.exists("test_bqca_a2a/confi
 with open(config_path) as f:
     llm_config = json.load(f)
 
-PROJECT_ID = llm_config["PROJECT_ID"]
+PROJECT_ID = (
+    os.environ.get("GOOGLE_CLOUD_PROJECT")
+    or os.environ.get("PROJECT_ID")
+    or llm_config.get("PROJECT_ID")
+)
+if not PROJECT_ID or PROJECT_ID.startswith("<"):
+    try:
+        _, PROJECT_ID = google.auth.default()
+    except Exception:
+        pass
+
 MODEL = llm_config["MODEL"]
 MODEL_REGION = llm_config["MODEL_REGION"]
 AGENT_REGISTRY_LOCATION = llm_config.get("AGENT_REGISTRY_LOCATION", "global")
+AGENT_REGISTRY_AGENT_ID = llm_config.get(
+    "AGENT_REGISTRY_AGENT_ID",
+    "agentregistry-00000000-0000-0000-1d75-ebe14ae5ecf2",
+)
 
-AGENT_NAME = "projects/gapinc-sandbox/locations/global/agents/agentregistry-00000000-0000-0000-1d75-ebe14ae5ecf2"
+AGENT_NAME = f"projects/{PROJECT_ID}/locations/{AGENT_REGISTRY_LOCATION}/agents/{AGENT_REGISTRY_AGENT_ID}"
 
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
