@@ -1,6 +1,8 @@
-# Gemini Data Agent CI/CD Deployment
+# BigQuery Data Agent CI/CD Deployment
 
-This repository provides CI/CD pipelines and Python scripts for automatically provisioning and configuring **Gemini Data Agents** (Conversational Analytics Agents) on Google Cloud using Cloud Build and the `google-cloud-geminidataanalytics` SDK.
+This repository provides CI/CD pipelines and Python scripts for automatically provisioning and configuring **Gemini Data Agents** (Conversational Analytics Agents) on Google Cloud using Cloud Build and the `google-cloud-geminidataanalytics` SDK. The sample code contains two use cases: 1) a low-code agent deployment example (agents are built out using natural language prompts and SQL, but wrapped and deployed with python SDK) and 2) a no-code agent deployment example (agent is created entirely in BigQuery, and the auto-generated A2A card is then used to extract and re-create the agent in other projects. 
+
+The purpose of this code is to present a way to promote low/no code data agents across environments (dev/stage/prod) in an automated fashion and integrate wtih CI/CD pipelines. 
 
 ---
 
@@ -19,7 +21,7 @@ This repository provides CI/CD pipelines and Python scripts for automatically pr
 
 ## 🚀 Key Components
 
-### 1. `data_agent_from_agent_card.py`
+### 1. `data_agent_from_agent_card.py` (no-code deployment)
 Dynamically creates a Data Agent from an Agent Card JSON file (`agent_card.json`):
 - **Agent Name & ID**: Extracts agent name, creates a CI/CD-specific ID (e.g., `<name>_cicd`).
 - **System Instructions**: Extracts system prompt instructions from `BQ Dataset Information` extension.
@@ -27,7 +29,7 @@ Dynamically creates a Data Agent from an Agent Card JSON file (`agent_card.json`
 - **Golden Example Queries**: Parses natural language questions and corresponding SQL queries into `ExampleQuery` protobuf definitions.
 - **Data Agent Deployment**: Registers the agent with `geminidataanalytics.DataAgentServiceClient`.
 
-### 2. `data_agent_manual_creation.py`
+### 2. `data_agent_manual_creation.py` (low-code deployment)
 A reference script demonstrating how to hardcode and deploy a custom Data Agent (e.g. Google Trends analytical agent) with join instructions, column guidelines, and golden queries.
 
 ### 3. `cloudbuild.yaml`

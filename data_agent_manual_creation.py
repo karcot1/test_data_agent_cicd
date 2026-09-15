@@ -15,7 +15,7 @@ args = parser.parse_args()
 
 project_id = args.project_id
 location = "global"
-data_agent_id = "test_low_code_agent_v2"
+data_agent_id = "test_low_code_agent_v3"
 
 system_instruction = """
 system_instruction:
