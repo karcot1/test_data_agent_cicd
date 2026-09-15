@@ -1,0 +1,24 @@
+steps:
+# Docker Build
+- id: 'build'
+  name: 'gcr.io/cloud-builders/docker'
+  dir: 'test_bqca_a2a'
+  args: ['build', '-t', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:$SHORT_SHA', '.']
+
+#Docker Push
+- id: 'push'
+  name: 'gcr.io/cloud-builders/docker'
+  dir: 'test_bqca_a2a'
+  args: ['push', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:$SHORT_SHA']
+
+#Register new agent info
+- id: 'update-agent-info'
+  name: 'gcr.io/cloud-builders/gcloud'
+  dir: 'test_bqca_a2a'
+  entrypoint: 'bash'
+  env:
+    - 'TAG=$SHORT_SHA'
+  args: ['update_agent_deployment.sh']
+
+options:
+  logging: CLOUD_LOGGING_ONLY

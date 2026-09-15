@@ -193,6 +193,8 @@ agent_card_json_data["url"] = (
     agent_card_json_data.get("url")
     or f"https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}"
 )
+# Normalize transport binding from "HTTP_JSON" to "HTTP+JSON" for a2a-sdk 1.x compatibility
+agent_card_json_data["preferredTransport"] = "HTTP+JSON"
 
 # 4. Format payload for Google Cloud Agent Registry
 service_id = data_agent_id.replace("_", "-")
