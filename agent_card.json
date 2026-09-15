@@ -1,8 +1,8 @@
 {
   "protocolVersion": "0.3",
-  "name": "data_community_monthly_demo",
-  "description": "A test agent to demonstrate BQCA CI/CD",
-  "url": "https://geminidataanalytics.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/global/dataAgents/agent_7d1696e6-41a6-4129-a218-be1a575ccbb4",
+  "name": "data_community_monthly_v2",
+  "description": "Second version of demo agent",
+  "url": "https://geminidataanalytics.googleapis.com/v1beta/a2a/projects/gapinc-sandbox/locations/global/dataAgents/agent_9d4b7d53-e080-4079-b825-4a86f5160fcc",
   "preferredTransport": "INTERNAL_HTTP+JSON",
   "defaultInputModes": [
     "text/plain",
@@ -127,7 +127,7 @@
         "description": "BQ Dataset Information",
         "required": false,
         "params": {
-          "system_instructions": "Provide answers to data-related questions that users may ask.",
+          "system_instructions": "Answer data-related questions that users might have.\nPrint the query and ask for confirmation before executing.",
           "table_info": [
             "gapinc-sandbox.query_costcontrol_test.test_table"
           ]

@@ -10,13 +10,20 @@ import google.auth
 import google.auth.transport.requests
 import httpx
 
-data_agent_client = geminidataanalytics.DataAgentServiceClient()
+import subprocess
+import google.oauth2.credentials
 
-credentials, _ = google.auth.default(
-    scopes=["https://www.googleapis.com/auth/cloud-platform"]
-)
-auth_request = google.auth.transport.requests.Request()
-credentials.refresh(auth_request)
+try:
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    auth_request = google.auth.transport.requests.Request()
+    credentials.refresh(auth_request)
+except Exception:
+    token = subprocess.check_output(["gcloud", "auth", "print-access-token"], text=True).strip()
+    credentials = google.oauth2.credentials.Credentials(token=token)
+
+data_agent_client = geminidataanalytics.DataAgentServiceClient(credentials=credentials)
 
 # Create the parser
 parser = argparse.ArgumentParser(description="Process deployment parameters.")
@@ -196,10 +203,13 @@ agent_card_json_data["url"] = (
 # Normalize transport binding from "HTTP_JSON" to "HTTP+JSON" for a2a-sdk 1.x compatibility
 agent_card_json_data["preferredTransport"] = "HTTP+JSON"
 
-# 4. Format payload for Google Cloud Agent Registry
-service_id = data_agent_id.replace("_", "-")
+# 4. Format payload for Google Cloud Agent Registry (enforcing <= 63 character limits on serviceId and displayName)
+service_id = data_agent_id.replace("_", "-")[:63].rstrip("-")
+raw_display_name = f"{data_agent_id} [BQCA Agent]"
+display_name = raw_display_name[:63].rstrip() if len(raw_display_name) > 63 else raw_display_name
+
 registry_payload = {
-    "displayName": f"{data_agent_id} [BigQuery Conversational Analytics Agent]",
+    "displayName": display_name,
     "description": agent_card_json_data["description"],
     "agentSpec": {
         "type": "A2A_AGENT_CARD",
@@ -208,47 +218,50 @@ registry_payload = {
 }
 
 # 5. Push into Agent Registry in both 'global' and 'us-central1', checking existing services for URL conflicts and polling the LRO
-# target_card_url = agent_card_json_data["url"]
+target_card_url = agent_card_json_data["url"]
 
-# for reg_location in ["global", "us-central1"]:
-#     services_base_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services"
+for reg_location in ["global", "us-central1"]:
+    services_base_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services"
 
-#     # Find if a service already owns this interface URL or service_id
-#     existing_service_name = None
-#     list_resp = httpx.get(services_base_url, headers=headers, timeout=60.0)
-#     if list_resp.status_code == 200:
-#         for svc in list_resp.json().get("services", []):
-#             svc_url = svc.get("agentSpec", {}).get("content", {}).get("url")
-#             if svc_url == target_card_url or svc.get("name", "").endswith(f"/services/{service_id}"):
-#                 existing_service_name = svc["name"]
-#                 break
+    # Find if a service already owns this interface URL or service_id
+    existing_service_name = None
+    list_resp = httpx.get(services_base_url, headers=headers, timeout=60.0)
+    if list_resp.status_code == 200:
+        for svc in list_resp.json().get("services", []):
+            svc_url = svc.get("agentSpec", {}).get("content", {}).get("url")
+            if svc_url == target_card_url or svc.get("name", "").endswith(f"/services/{service_id}"):
+                existing_service_name = svc["name"]
+                break
 
-#     if existing_service_name:
-#         print(f"Found existing Agent Registry service '{existing_service_name}' in '{reg_location}'. Updating via PATCH...")
-#         patch_url = f"https://agentregistry.googleapis.com/v1/{existing_service_name}?updateMask=agentSpec,displayName,description"
-#         registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
-#     else:
-#         print(f"Creating new Agent Registry service '{service_id}' in '{reg_location}'...")
-#         create_url = f"{services_base_url}?serviceId={service_id}"
-#         registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
+    if existing_service_name:
+        print(f"Found existing Agent Registry service '{existing_service_name}' in '{reg_location}'. Updating via PATCH...")
+        patch_url = f"https://agentregistry.googleapis.com/v1/{existing_service_name}?updateMask=agentSpec,displayName,description"
+        registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
+    else:
+        print(f"Creating new Agent Registry service '{service_id}' in '{reg_location}'...")
+        create_url = f"{services_base_url}?serviceId={service_id}"
+        registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
 
-#     registry_response.raise_for_status()
-#     op_data = registry_response.json()
-#     op_name = op_data.get("name")
+    if registry_response.status_code >= 400:
+        print(f"Agent Registry API Error ({registry_response.status_code}) in '{reg_location}': {registry_response.text}")
+    registry_response.raise_for_status()
 
-#     # Poll the Agent Registry LRO operation until done
-#     if op_name and "/operations/" in op_name:
-#         op_url = f"https://agentregistry.googleapis.com/v1/{op_name}"
-#         for _ in range(30):
-#             if op_data.get("done"):
-#                 break
-#             time.sleep(1)
-#             op_resp = httpx.get(op_url, headers=headers, timeout=60.0)
-#             op_resp.raise_for_status()
-#             op_data = op_resp.json()
+    op_data = registry_response.json()
+    op_name = op_data.get("name")
 
-#         if "error" in op_data:
-#             raise RuntimeError(f"Agent Registry LRO failed in '{reg_location}': {op_data['error']}")
+    # Poll the Agent Registry LRO operation until done
+    if op_name and "/operations/" in op_name:
+        op_url = f"https://agentregistry.googleapis.com/v1/{op_name}"
+        for _ in range(30):
+            if op_data.get("done"):
+                break
+            time.sleep(1)
+            op_resp = httpx.get(op_url, headers=headers, timeout=60.0)
+            op_resp.raise_for_status()
+            op_data = op_resp.json()
 
-#     print(f"Successfully registered agent in Agent Registry ({reg_location}):")
-#     print(op_data.get("response", op_data))
+        if "error" in op_data:
+            raise RuntimeError(f"Agent Registry LRO failed in '{reg_location}': {op_data['error']}")
+
+    print(f"Successfully registered agent in Agent Registry ({reg_location}):")
+    print(op_data.get("response", op_data))
