@@ -11,8 +11,8 @@ import httpx
 
 data_agent_client = geminidataanalytics.DataAgentServiceClient()
 
-credentials, project_id = google.auth.default(
-    scopes=["https://googleapis.com"]
+credentials, _ = google.auth.default(
+    scopes=["https://www.googleapis.com/auth/cloud-platform"]
 )
 auth_request = google.auth.transport.requests.Request()
 credentials.refresh(auth_request)
@@ -164,32 +164,39 @@ except exceptions.AlreadyExists:
     print("Updated DataAgent:", operation.result().name)
 
 # Register the agent with A2A protocol in Agent Registry
-A2A_CARD_URL = f"https://geminidataanalytics.googleapis.com/v1beta/projects/{project_id}/locations/{location}/agents/{data_agent_id}/.well-known/agent-card.json"
-REGISTRY_URL = f"https://geminidataanalytics.googleapis.com/v1beta/projects/{project_id}/locations/{location}/agents"
+A2A_CARD_URL = f"https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}/v1/card"
 
 headers = {
     "Authorization": f"Bearer {credentials.token}",
     "Content-Type": "application/json",
-    "A2A-Extensions": "GcpResource"
 }
 
-# 3. Pull the live A2A Agent Card JSON from BigQuery
-card_response = httpx.get(A2A_CARD_URL, headers=headers)
+# 3. Pull the live A2A Agent Card JSON from BigQuery Conversational Analytics
+card_response = httpx.get(A2A_CARD_URL, headers=headers, timeout=60.0)
 card_response.raise_for_status()
 agent_card_json_data = card_response.json()
 
-# 4. Format payload for Agent Registry
-# Injecting the fetched layout into the register blueprint
+# 4. Format payload for Google Cloud Agent Registry
+service_id = data_agent_id.replace("_", "-")
 registry_payload = {
     "displayName": f"{data_agent_id} [BigQuery Conversational Analytics Agent]",
     "description": "Enterprise data agent for natural language BigQuery reporting.",
-    "agentType": "CUSTOM_VIA_A2A",
-    "agentCardJson": card_response.text  # The raw JSON string containing the A2A spec
+    "agentSpec": {
+        "type": "A2A_AGENT_CARD",
+        "content": agent_card_json_data,
+    },
 }
 
-# 5. Push directly into the Agent Registry
-registry_response = httpx.post(REGISTRY_URL, headers=headers, json=registry_payload)
+# 5. Push directly into the Agent Registry (create or update via PATCH on 409)
+create_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{location}/services?serviceId={service_id}"
+patch_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{location}/services/{service_id}?updateMask=agentSpec,displayName,description"
+
+registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
+if registry_response.status_code == 409:
+    print(f"Agent Registry service '{service_id}' already exists. Updating via PATCH...")
+    registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
+
 registry_response.raise_for_status()
 
-print("Successfully registered agent! Server response:")
+print("Successfully registered agent in Agent Registry! Server response:")
 print(registry_response.json())
