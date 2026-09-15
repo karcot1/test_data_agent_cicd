@@ -2,14 +2,14 @@ steps:
 # Docker Build
 - id: 'build'
   name: 'gcr.io/cloud-builders/docker'
-  dir: 'restaurant_agent'
-  args: ['build', '-t', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/restaurant_agent:$SHORT_SHA', '.']
+  dir: 'test_bqca_a2a'
+  args: ['build', '-t', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:$SHORT_SHA', '.']
 
 #Docker Push
 - id: 'push'
   name: 'gcr.io/cloud-builders/docker'
-  dir: 'restaurant_agent'
-  args: ['push', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/restaurant_agent:$SHORT_SHA']
+  dir: 'test_bqca_a2a'
+  args: ['push', 'us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:$SHORT_SHA']
 
 #Agent Deploy with Terraform
 - id: 'tf-init'
@@ -22,9 +22,9 @@ steps:
     - '-var=project_id=${_PROJECT_ID}'
     - '-var=location=${_LOCATION}'
     - '-var=image_tag=${SHORT_SHA}'
-    - '-var=agent_name=restaurant_agent'
-    - '-var=agent_display_name=Restaurant Agent'
-    - '-var=agent_description=BYOC Agent for learning about food at restaurants'
+    - '-var=agent_name=test_bqca_a2a_agent'
+    - '-var=agent_display_name=Test BQCA Agent using A2A Card'
+    - '-var=agent_description=BQCA Agent built using A2A Card'
     - '-var=agent_framework=google-adk'
 
 - id: 'tf-plan'
@@ -38,9 +38,9 @@ steps:
     - '-var=project_id=${_PROJECT_ID}'
     - '-var=location=${_LOCATION}'
     - '-var=image_tag=${SHORT_SHA}'
-    - '-var=agent_name=restaurant_agent'
-    - '-var=agent_display_name=Restaurant Agent'
-    - '-var=agent_description=BYOC Agent for learning about food at restaurants'
+    - '-var=agent_name=test_bqca_a2a_agent'
+    - '-var=agent_display_name=Test BQCA Agent using A2A Card'
+    - '-var=agent_description=BQCA Agent built using A2A Card'
     - '-var=agent_framework=google-adk'
 
 - id: 'tf-apply'

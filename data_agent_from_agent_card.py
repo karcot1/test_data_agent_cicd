@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 import argparse
 from google.api_core import exceptions
 from google.cloud import geminidataanalytics
@@ -204,16 +205,48 @@ registry_payload = {
     },
 }
 
-# 5. Push into Agent Registry in both 'global' and 'us-central1' so it is visible regardless of the Console Region filter
-for reg_location in ["global"]:
-    create_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services?serviceId={service_id}"
-    patch_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services/{service_id}?updateMask=agentSpec,displayName,description"
+# 5. Push into Agent Registry in both 'global' and 'us-central1', checking existing services for URL conflicts and polling the LRO
+target_card_url = agent_card_json_data["url"]
 
-    registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
-    if registry_response.status_code == 409:
-        print(f"Agent Registry service '{service_id}' in '{reg_location}' already exists. Updating via PATCH...")
+for reg_location in ["global", "us-central1"]:
+    services_base_url = f"https://agentregistry.googleapis.com/v1/projects/{project_id}/locations/{reg_location}/services"
+
+    # Find if a service already owns this interface URL or service_id
+    existing_service_name = None
+    list_resp = httpx.get(services_base_url, headers=headers, timeout=60.0)
+    if list_resp.status_code == 200:
+        for svc in list_resp.json().get("services", []):
+            svc_url = svc.get("agentSpec", {}).get("content", {}).get("url")
+            if svc_url == target_card_url or svc.get("name", "").endswith(f"/services/{service_id}"):
+                existing_service_name = svc["name"]
+                break
+
+    if existing_service_name:
+        print(f"Found existing Agent Registry service '{existing_service_name}' in '{reg_location}'. Updating via PATCH...")
+        patch_url = f"https://agentregistry.googleapis.com/v1/{existing_service_name}?updateMask=agentSpec,displayName,description"
         registry_response = httpx.patch(patch_url, headers=headers, json=registry_payload, timeout=60.0)
+    else:
+        print(f"Creating new Agent Registry service '{service_id}' in '{reg_location}'...")
+        create_url = f"{services_base_url}?serviceId={service_id}"
+        registry_response = httpx.post(create_url, headers=headers, json=registry_payload, timeout=60.0)
 
     registry_response.raise_for_status()
+    op_data = registry_response.json()
+    op_name = op_data.get("name")
+
+    # Poll the Agent Registry LRO operation until done
+    if op_name and "/operations/" in op_name:
+        op_url = f"https://agentregistry.googleapis.com/v1/{op_name}"
+        for _ in range(30):
+            if op_data.get("done"):
+                break
+            time.sleep(1)
+            op_resp = httpx.get(op_url, headers=headers, timeout=60.0)
+            op_resp.raise_for_status()
+            op_data = op_resp.json()
+
+        if "error" in op_data:
+            raise RuntimeError(f"Agent Registry LRO failed in '{reg_location}': {op_data['error']}")
+
     print(f"Successfully registered agent in Agent Registry ({reg_location}):")
-    print(registry_response.json())
+    print(op_data.get("response", op_data))

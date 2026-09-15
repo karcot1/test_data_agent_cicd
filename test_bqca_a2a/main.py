@@ -10,15 +10,16 @@ from vertexai import agent_engines
 from google.adk.sessions import VertexAiSessionService, InMemorySessionService
 
 try:
-    from restaurant_agent.agent import root_agent
+    from test_bqca_a2a.agent import root_agent
 except ModuleNotFoundError:
     from agent import root_agent
 
 app = FastAPI()
 
-config_path = "restaurant_agent/config.json" if os.path.exists("restaurant_agent/config.json") else "config.json"
+config_path = "test_bqca_a2a/config.json" if os.path.exists("test_bqca_a2a/config.json") else "config.json"
 with open(config_path) as f:
     config_json = json.load(f)
+    
 PROJECT_ID = config_json["PROJECT_ID"]
 LOCATION = config_json["LOCATION"]
 MODEL_REGION = config_json["MODEL_REGION"]
