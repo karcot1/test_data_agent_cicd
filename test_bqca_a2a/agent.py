@@ -45,8 +45,9 @@ llm_model = (
 )
 
 root_agent = Agent(
-    name="test_no_code_agent",
-    description="BigQuery CA agent answering questions about attached data.",
+    name="test_bqca_a2a_agent",
+    description="Orchestrator agent that answers data questions using the BigQuery Conversational Analytics A2A agent.",
+    instruction="You are a helpful data assistant. Delegate all data analysis and BigQuery questions to the test_no_code_agent sub-agent.",
     model=llm_model,
     sub_agents=[remote_agent],
 )

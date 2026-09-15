@@ -9,9 +9,9 @@ from fastapi import FastAPI, encoders, responses, Request
 from vertexai import agent_engines
 from google.adk.sessions import VertexAiSessionService, InMemorySessionService
 
-try:
+if os.path.exists("test_bqca_a2a/agent.py"):
     from test_bqca_a2a.agent import root_agent
-except ModuleNotFoundError:
+else:
     from agent import root_agent
 
 app = FastAPI()
