@@ -55,6 +55,7 @@ class GoogleCloudAuth(httpx.Auth):
                 token = subprocess.check_output(["gcloud", "auth", "print-access-token"], text=True).strip()
                 self.credentials = google.oauth2.credentials.Credentials(token=token)
         request.headers["Authorization"] = f"Bearer {self.credentials.token}"
+        request.headers["x-goog-user-project"] = PROJECT_ID
         yield request
 
 
