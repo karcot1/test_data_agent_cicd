@@ -1,0 +1,131 @@
+"""Compare desired agent specs with live Data Agents and create/update only what changed."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from google.api_core import exceptions
+from google.cloud import geminidataanalytics
+from google.protobuf import field_mask_pb2
+
+from deployer.specs import AgentSpec
+
+CREATE = "CREATE"
+MODIFY = "MODIFY"
+SKIP = "SKIP"
+ERROR = "ERROR"
+
+
+@dataclass
+class Result:
+    agent_id: str
+    source: str
+    action: str
+    changed_fields: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def _tables(ctx) -> list[tuple[str, str, str]]:
+    return [
+        (t.project_id, t.dataset_id, t.table_id)
+        for t in ctx.datasource_references.bq.table_references
+    ]
+
+
+def _examples(ctx) -> list[tuple]:
+    return [
+        (
+            q.natural_language_question.strip(),
+            q.sql_query.strip(),
+            [(p.name, p.description, p.data_type) for p in q.parameters],
+        )
+        for q in ctx.example_queries
+    ]
+
+
+def diff_data_agent(
+    existing: geminidataanalytics.DataAgent,
+    desired: geminidataanalytics.DataAgent,
+) -> list[str]:
+    """Return the names of fields that differ between the live and desired agent.
+
+    display_name / description are only compared when the desired agent sets them,
+    so definitions that leave them blank don't overwrite values set elsewhere.
+    """
+    changed: list[str] = []
+
+    if existing.delete_time:
+        changed.append("delete_time (soft-deleted)")
+
+    if desired.display_name and existing.display_name != desired.display_name:
+        changed.append("display_name")
+
+    if desired.description and existing.description != desired.description:
+        changed.append("description")
+
+    existing_ctx = existing.data_analytics_agent.published_context
+    desired_ctx = desired.data_analytics_agent.published_context
+
+    if existing_ctx.system_instruction.strip() != desired_ctx.system_instruction.strip():
+        changed.append("system_instruction")
+
+    if _tables(existing_ctx) != _tables(desired_ctx):
+        changed.append("table_references")
+
+    if _examples(existing_ctx) != _examples(desired_ctx):
+        changed.append("example_queries")
+
+    return changed
+
+
+def update_mask_for(desired: geminidataanalytics.DataAgent) -> field_mask_pb2.FieldMask:
+    paths = []
+    if desired.display_name:
+        paths.append("display_name")
+    if desired.description:
+        paths.append("description")
+    paths.append("data_analytics_agent")
+    return field_mask_pb2.FieldMask(paths=paths)
+
+
+def _update(client, desired: geminidataanalytics.DataAgent) -> None:
+    operation = client.update_data_agent(
+        request=geminidataanalytics.UpdateDataAgentRequest(
+            data_agent=desired, update_mask=update_mask_for(desired)
+        )
+    )
+    operation.result()
+
+
+def reconcile(client, spec: AgentSpec, dry_run: bool = False) -> Result:
+    """Create, update or skip a single Data Agent. Only reads when dry_run is True."""
+    desired = spec.data_agent
+    try:
+        existing = client.get_data_agent(name=desired.name)
+    except exceptions.NotFound:
+        existing = None
+
+    if existing is None:
+        if not dry_run:
+            parent = desired.name.rsplit("/dataAgents/", 1)[0]
+            try:
+                operation = client.create_data_agent(
+                    request=geminidataanalytics.CreateDataAgentRequest(
+                        parent=parent,
+                        data_agent_id=spec.agent_id,
+                        data_agent=desired,
+                    )
+                )
+                operation.result()
+            except exceptions.AlreadyExists:
+                # Soft-deleted agents keep their ID for 30 days; restore by updating in place.
+                _update(client, desired)
+        return Result(spec.agent_id, spec.source, CREATE)
+
+    changed = diff_data_agent(existing, desired)
+    if not changed:
+        return Result(spec.agent_id, spec.source, SKIP)
+
+    if not dry_run:
+        _update(client, desired)
+    return Result(spec.agent_id, spec.source, MODIFY, changed_fields=changed)

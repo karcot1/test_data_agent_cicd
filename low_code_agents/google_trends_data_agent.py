@@ -1,25 +1,14 @@
-import os
-import argparse
-from google.api_core import exceptions
+"""Low-code Data Agent definition: Google Trends analyst.
+
+Deployed by `python -m deployer`. This module only describes the desired agent;
+it must define AGENT_ID and build_agent(project_id, location).
+"""
+
 from google.cloud import geminidataanalytics
-from google.protobuf import field_mask_pb2
 
-data_agent_client = geminidataanalytics.DataAgentServiceClient()
+AGENT_ID = "test_low_code_agent"
 
-# Create the parser
-parser = argparse.ArgumentParser(description="Process deployment parameters.")
-
-# Add arguments (both positional and named flags are supported)
-parser.add_argument("--project_id", required=True, help="The GCP project ID")
-
-# Parse arguments
-args = parser.parse_args()
-
-project_id = args.project_id
-location = "global"
-data_agent_id = "test_low_code_agent"
-
-system_instruction = """
+SYSTEM_INSTRUCTION = """
 system_instruction:
   - You are a data analyst specializing in the Google Trends dataset.
   - When querying, always use the 'week' column for date-based filtering. This needs to be a Sunday. If you are doing week over week comparison, make sure you specify a date that is a Sunday.
@@ -73,53 +62,33 @@ golden_queries:
           top.rank;
 """
 
-# BigQuery table data sources
-bq_top = geminidataanalytics.BigQueryTableReference(
-    project_id="bigquery-public-data", dataset_id="google_trends", table_id="top_terms"
-)
-bq_rising = geminidataanalytics.BigQueryTableReference(
-    project_id="bigquery-public-data", dataset_id="google_trends", table_id="top_rising_terms"
-)
-datasource_references = geminidataanalytics.DatasourceReferences(
-    bq=geminidataanalytics.BigQueryTableReferences(table_references=[bq_top, bq_rising]))
+TABLES = [
+    ("bigquery-public-data", "google_trends", "top_terms"),
+    ("bigquery-public-data", "google_trends", "top_rising_terms"),
+]
 
-# Context setup for stateful chat
-published_context = geminidataanalytics.Context(
-    system_instruction=system_instruction,
-    datasource_references=datasource_references,
-    options=geminidataanalytics.ConversationOptions(
-        analysis=geminidataanalytics.AnalysisOptions(
-            python=geminidataanalytics.AnalysisOptions.Python(
-                enabled=False
+
+def build_agent(project_id: str, location: str) -> geminidataanalytics.DataAgent:
+    """Return the desired DataAgent. The deployer fills in `name` from AGENT_ID."""
+    return geminidataanalytics.DataAgent(
+        data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
+            published_context=geminidataanalytics.Context(
+                system_instruction=SYSTEM_INSTRUCTION,
+                datasource_references=geminidataanalytics.DatasourceReferences(
+                    bq=geminidataanalytics.BigQueryTableReferences(
+                        table_references=[
+                            geminidataanalytics.BigQueryTableReference(
+                                project_id=p, dataset_id=d, table_id=t
+                            )
+                            for p, d, t in TABLES
+                        ]
+                    )
+                ),
+                options=geminidataanalytics.ConversationOptions(
+                    analysis=geminidataanalytics.AnalysisOptions(
+                        python=geminidataanalytics.AnalysisOptions.Python(enabled=False)
+                    )
+                ),
             )
-        )
-    ),
-)
-
-data_agent = geminidataanalytics.DataAgent(
-    name=f"projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}",
-    data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
-        published_context=published_context
-    ),
-)
-
-# Create the agent
-try:
-    operation = data_agent_client.create_data_agent(
-        request=geminidataanalytics.CreateDataAgentRequest(
-            parent=f"projects/{project_id}/locations/{location}",
-            data_agent_id=data_agent_id,
-            data_agent=data_agent,
-        )
+        ),
     )
-    print("Created DataAgent:", operation.result().name)
-
-except exceptions.AlreadyExists:
-    print(f"DataAgent '{data_agent_id}' already exists. Updating in-place...")
-    operation = data_agent_client.update_data_agent(
-        request=geminidataanalytics.UpdateDataAgentRequest(
-            data_agent=data_agent,
-            update_mask=field_mask_pb2.FieldMask(paths=["data_analytics_agent"]),
-        )
-    )
-    print("Updated DataAgent:", operation.result().name)

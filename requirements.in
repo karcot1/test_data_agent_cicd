@@ -1,0 +1,12 @@
+# Top-level dependencies for the deployer package and its tests.
+# After editing, regenerate the fully pinned lock file with:
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.11
+google-cloud-geminidataanalytics==0.13.2
+google-auth==2.58.0
+httpx==0.28.1
+pytest==8.*
+
+# Transitive constraints: keep compatible with the ADK / A2A packages that share
+# the local .venv (a2a-sdk requires protobuf<7; opentelemetry-sdk 1.42.1 pins its api).
+protobuf<7
+opentelemetry-api==1.42.1

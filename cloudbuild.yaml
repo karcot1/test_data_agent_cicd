@@ -1,21 +1,55 @@
-steps:
-  - id: 'create-low-code-agent'
-    name: 'python:3.11-slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        pip install --no-cache-dir -r requirements.txt
-        python data_agent_manual_creation.py --project_id=$PROJECT_ID
-        
-  - id: 'create-no-code-agent' 
-    name: 'python:3.11-slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        pip install --no-cache-dir -r requirements.txt
-        python data_agent_from_agent_card.py --project_id=$PROJECT_ID --file_path=agent_card.json
+# Data Agent CI/CD pipeline.
+#
+# 1. Build a dependencies-only image (cached from the previous :latest), so pip
+#    install only re-runs when requirements.txt changes.
+# 2. Run the offline unit tests.
+# 3. Run the deployer, which creates/updates only the agents whose definitions
+#    changed, syncs Agent Registry and applies Gemini Enterprise egress IAM.
+#
+# For a pull-request trigger, set the substitution _DEPLOY_ARGS=--dry-run.
+
+substitutions:
+  _DEPLOYER_IMAGE: us-docker.pkg.dev/${PROJECT_ID}/agent-repo/agent-deployer
+  _DEPLOY_ARGS: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+
+steps:
+  - id: 'pull-cache'
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: ['-c', 'docker pull ${_DEPLOYER_IMAGE}:latest || true']
+
+  - id: 'build-image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'deployer/Dockerfile'
+      - '--cache-from'
+      - '${_DEPLOYER_IMAGE}:latest'
+      - '-t'
+      - '${_DEPLOYER_IMAGE}:latest'
+      - '-t'
+      - '${_DEPLOYER_IMAGE}:${BUILD_ID}'
+      - '.'
+
+  # Runs alongside the tests; keeps the layer cache warm for the next build.
+  - id: 'push-image'
+    name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['build-image']
+    args: ['push', '--all-tags', '${_DEPLOYER_IMAGE}']
+
+  - id: 'test'
+    name: '${_DEPLOYER_IMAGE}:${BUILD_ID}'
+    waitFor: ['build-image']
+    entrypoint: 'python'
+    args: ['-m', 'pytest', '-q', 'tests']
+
+  - id: 'deploy'
+    name: '${_DEPLOYER_IMAGE}:${BUILD_ID}'
+    waitFor: ['test']
+    entrypoint: 'bash'
+    args: ['-c', 'python -m deployer --project_id=${PROJECT_ID} ${_DEPLOY_ARGS}']

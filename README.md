@@ -2,10 +2,11 @@
 
 This repository provides CI/CD pipelines, Terraform modules, and Python scripts for automatically provisioning **BigQuery Conversational Analytics (Gemini Data Analytics) Agents**, registering them in **Google Cloud Agent Registry**, and orchestrating them from a **Vertex AI Reasoning Engine (Agent Engine) BYOC container** using the **Agent-to-Agent (A2A) protocol** and **Google Agent Development Kit (ADK)**.
 
-The repository supports three core workflows:
-1. **No-Code Data Agent CI/CD (`data_agent_from_agent_card.py`)**: Promotes an agent created in BigQuery across environments (`dev`/`stage`/`prod`) using its A2A Agent Card (`agent_card.json`) and registers it in Google Cloud Agent Registry.
-2. **Low-Code Data Agent CI/CD (`data_agent_manual_creation.py`)**: Defines and deploys a Gemini Data Analytics agent programmatically using Python (`google-cloud-geminidataanalytics` SDK).
-3. **A2A Multi-Agent Orchestrator on Vertex AI Reasoning Engine (`test_bqca_a2a/`)**: Deploys a containerized Google ADK orchestrator agent (`test_bqca_a2a_agent`) on Vertex AI Reasoning Engine that discovers the BigQuery Conversational Analytics agent (`test_no_code_agent`) from Agent Registry and delegates natural language data analysis queries to it over authenticated A2A REST transport.
+The repository supports two core workflows:
+1. **Data Agent CI/CD (`deployer/`)**: A single deployer (`python -m deployer`) that reads every agent definition in the repo, creates or updates **only** the BigQuery Conversational Analytics Data Agents whose definitions changed, registers no-code agents in Google Cloud Agent Registry, and grants Gemini Enterprise agent identities the IAP egress roles they need. Agents can be defined two ways:
+   - **No-code**: an A2A Agent Card exported from BigQuery, dropped into `agent_cards/`.
+   - **Low-code**: a small Python module in `low_code_agents/` that builds the `DataAgent` with the `google-cloud-geminidataanalytics` SDK.
+2. **A2A Multi-Agent Orchestrator on Vertex AI Reasoning Engine (`test_bqca_a2a/`)**: Deploys a containerized Google ADK orchestrator agent (`test_bqca_a2a_agent`) on Vertex AI Reasoning Engine that discovers the BigQuery Conversational Analytics agent (`test_no_code_agent`) from Agent Registry and delegates natural language data analysis queries to it over authenticated A2A REST transport.
 
 ---
 
@@ -13,12 +14,22 @@ The repository supports three core workflows:
 
 ```text
 .
-├── agent_card.json                        # Source A2A Agent Card specification (metadata, table references, golden queries)
-├── cloudbuild.yaml                        # Cloud Build pipeline for automated Data Agent provisioning & Agent Registry sync
-├── data_agent_from_agent_card.py          # Deploys/updates Data Agent from agent_card.json and registers it in Agent Registry
-├── data_agent_manual_creation.py          # Programmatic low-code Data Agent deployment script
-├── deploy_a2a.py                          # Standalone A2A client reference script for testing Data Agent A2A endpoints
-├── requirements.txt                       # Python dependencies for Data Agent CI/CD scripts
+├── agent_cards/                           # No-code agents: one A2A Agent Card JSON per agent
+├── low_code_agents/                       # Low-code agents: one Python module per agent (AGENT_ID + build_agent)
+├── deployer/                              # Deployer package (python -m deployer)
+│   ├── Dockerfile                         # Dependencies-only image used by Cloud Build steps
+│   ├── cli.py                             # Entrypoint: load → reconcile → Agent Registry → IAM → summary
+│   ├── specs.py                           # Loads agent cards / low-code modules into AgentSpecs
+│   ├── reconcile.py                       # get → diff → CREATE / MODIFY / SKIP
+│   ├── registry.py                        # Agent Registry sync (global + us-central1)
+│   ├── iam.py                             # Gemini Enterprise IAP egress bindings
+│   └── auth.py                            # ADC with gcloud fallback
+├── tests/                                 # Offline unit tests (no GCP calls)
+├── cloudbuild.yaml                        # Build image → test → deploy
+├── requirements.in                        # Top-level dependencies (edit this)
+├── requirements.txt                       # Fully pinned lock file (generated from requirements.in)
+├── examples/
+│   └── deploy_a2a.py                      # Standalone A2A client for manually testing a Data Agent endpoint
 ├── terraform/                             # Terraform configuration for Vertex AI Reasoning Engine BYOC deployment
 │   ├── main.tf                            # google_vertex_ai_reasoning_engine resource definition
 │   └── variables.tf                       # Terraform input variables (project_id, location, image_tag, etc.)
@@ -37,18 +48,48 @@ The repository supports three core workflows:
 
 ## 🚀 Key Components
 
-### 1. `data_agent_from_agent_card.py` (No-Code Data Agent & Agent Registry CI/CD)
-Dynamically provisions or updates a BigQuery Conversational Analytics Data Agent from `agent_card.json` and registers its live A2A endpoint in Google Cloud Agent Registry:
-- **Datasource & Prompt Extraction**: Parses system instructions, golden SQL example queries (`ExampleQuery`), and fully-qualified BigQuery table references (`project.dataset.table`) from the `BQ Dataset Information` extension in `agent_card.json`.
-- **Idempotent Creation & Soft-Delete Handling**: Calls `create_data_agent()` and automatically catches `google.api_core.exceptions.AlreadyExists` (including soft-deleted agents within the 30-day retention window), seamlessly falling back to `update_data_agent()` with an explicit `FieldMask`.
-- **Live A2A Card Retrieval**: Fetches the live A2A Agent Card directly from the Gemini Data Analytics A2A endpoint:
-  ```text
-  https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}/v1/card
+### 1. `deployer/` (Data Agent, Agent Registry & IAM CI/CD)
+
+```bash
+python -m deployer --project_id=<PROJECT_ID> [--dry-run] [--skip-registry] [--skip-iam]
+                   [--no_code_dir=agent_cards] [--low_code_dir=low_code_agents] [--location=global]
+```
+
+For every agent definition, the deployer:
+- **Builds the desired `DataAgent`**. From an agent card it reads the system instructions, golden SQL example queries (`ExampleQuery`, with optional parameters given as names or `{name, description, data_type}` objects) and fully-qualified table references (`project.dataset.table`) from the `BQ Dataset Information` extension. A low-code module's `build_agent()` returns the `DataAgent` directly.
+- **Diffs against the live agent** (`display_name`, `description`, `system_instruction`, `table_references`, `example_queries`, soft-delete state) and prints one of:
+  - `[CREATE]`: the agent doesn't exist. A soft-deleted ID (`409 AlreadyExists`, 30-day retention) is restored in place with `update_data_agent()`.
+  - `[MODIFY]`: one or more fields changed. The changed fields are listed.
+  - `[SKIP]`: already up to date. No API writes.
+- **Syncs Agent Registry** (no-code agents only) in `global` and `us-central1` when the agent was created/modified or is missing from a location. It fetches the live card from `.../dataAgents/{id}/v1/card`, normalizes `preferredTransport` to `HTTP+JSON` for `a2a-sdk` 1.x, then `PATCH`es or `POST`s the service and polls the operation.
+- **Applies Gemini Enterprise egress IAM.** It finds GE agents that front these Data Agents and adds (never removes) their principals to `roles/iap.viewer` + `roles/iap.egressor` on the project and `roles/iap.egressor` on `iap_web`.
+
+A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions (missing `name`, bad JSON, duplicate IDs) stop the run with exit code `2` before anything is changed.
+
+#### Adding an agent
+- **No-code:** export the A2A Agent Card from BigQuery and save it as `agent_cards/<anything>.json`. The Data Agent ID is `<card name>_no_code_agent`.
+- **Low-code:** add `low_code_agents/<anything>.py` defining:
+  ```python
+  from google.cloud import geminidataanalytics
+
+  AGENT_ID = "my_low_code_agent"
+
+  def build_agent(project_id: str, location: str) -> geminidataanalytics.DataAgent:
+      return geminidataanalytics.DataAgent(
+          data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
+              published_context=geminidataanalytics.Context(...)
+          )
+      )
   ```
-- **A2A Transport Normalization (`HTTP+JSON`)**: Normalizes `"preferredTransport"` from `"HTTP_JSON"` (returned by Gemini Data Analytics) to `"HTTP+JSON"` so that `a2a-sdk` 1.x (`TransportProtocol.HTTP_JSON`) recognizes the interface binding.
-- **Google Cloud Agent Registry Synchronization**: Registers/updates the agent in `agentregistry.googleapis.com` across both `global` and regional (`us-central1`) endpoints:
-  - Checks existing Agent Registry `/services` for matching interface URLs or service IDs to prevent duplicate URL conflicts.
-  - Executes `PATCH` (if the service already exists) or `POST` (if creating a new service) and polls the returned Long-Running Operation (LRO) until completion.
+  Leave `name` unset; the deployer fills it in from `AGENT_ID`. Files starting with `_` are ignored, so you can use them for shared helpers.
+
+#### Running locally
+```bash
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest -q
+.venv/bin/python -m deployer --project_id=<PROJECT_ID> --dry-run
+```
+To change dependencies, edit `requirements.in`, then run `uv pip compile requirements.in -o requirements.txt --python-version 3.11`.
 
 ### 2. `test_bqca_a2a/` (Vertex AI Reasoning Engine A2A Orchestrator)
 Contains a containerized Google ADK agent (`test_bqca_a2a_agent`) deployed as a BYOC Vertex AI Reasoning Engine in `us-central1`:
@@ -80,7 +121,7 @@ gcloud services enable \
 ```
 
 ### 2. Required IAM Permissions Table
-Because the Reasoning Engine service agent (`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) invokes Gemini Data Analytics (`geminidataanalytics.googleapis.com`) on behalf of the user, and Gemini Data Analytics queries BigQuery tables using the caller's identity, IAM roles must be granted across both the **host project** and any **external projects hosting BigQuery tables** referenced in `agent_card.json`.
+Because the Reasoning Engine service agent (`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) invokes Gemini Data Analytics (`geminidataanalytics.googleapis.com`) on behalf of the user, and Gemini Data Analytics queries BigQuery tables using the caller's identity, IAM roles must be granted across both the **host project** and any **external projects hosting BigQuery tables** referenced by your agent definitions (`agent_cards/`, `low_code_agents/`).
 
 | Principal (Service Account / Identity) | Required IAM Role | Target Project / Resource | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -91,7 +132,7 @@ Because the Reasoning Engine service agent (`service-<PROJECT_NUMBER>@gcp-sa-aip
 | **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/aiplatform.user` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows the orchestrator agent (`root_agent`) to invoke Vertex AI Gemini models (`gemini-3.1-flash-lite`, etc.). |
 | **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/artifactregistry.reader` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows Vertex AI Reasoning Engine to pull the BYOC container image from Artifact Registry. |
 | **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.jobUser`<br>`roles/bigquery.dataViewer` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows Gemini Data Analytics to run BigQuery SQL jobs and read tables in the host project on behalf of the Reasoning Engine. |
-| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.dataViewer` | **All External BigQuery Table Projects**<br>*(e.g., `base-tables`, `shared-data-project-493303`, `team-jj-493303`)* | **Critical:** Allows Gemini Data Analytics to retrieve table metadata and query tables located in external projects referenced in `agent_card.json`. |
+| **Reasoning Engine Service Agent**<br>`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | `roles/bigquery.dataViewer` | **All External BigQuery Table Projects**<br>*(e.g., `base-tables`, `shared-data-project-493303`, `team-jj-493303`)* | **Critical:** Allows Gemini Data Analytics to retrieve table metadata and query tables located in external projects referenced by your agent definitions (`agent_cards/`, `low_code_agents/`). |
 | **Cloud Build / Deployment SA**<br>`<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com` & `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com` | `roles/geminidataanalytics.admin`<br>`roles/agentregistry.admin`<br>`roles/aiplatform.admin`<br>`roles/artifactregistry.writer`<br>`roles/storage.admin` | Host Project<br>*(e.g., `<YOUR_PROJECT_ID>`)* | Allows CI/CD pipelines to create/update Data Agents, register services in Agent Registry, push Docker images, and deploy Reasoning Engines via Terraform. |
 
 #### Quick CLI Commands to Grant Reasoning Engine Permissions
@@ -133,15 +174,15 @@ Below is a reference of common errors encountered when deploying BigQuery Conver
 
 | Error Message | Root Cause | Resolution |
 | :--- | :--- | :--- |
-| **`409 Resource 'projects/.../locations/global/dataAgents/<id>' already exists`** *(even after deleting the agent in the UI or via API)* | BigQuery Conversational Analytics **soft-deletes** `DataAgent` resources and retains the ID for **30 days** before permanent purge. Calling `create_data_agent()` with the same `data_agent_id` returns `409 AlreadyExists`. | Catch `google.api_core.exceptions.AlreadyExists` and call `update_data_agent()` with an explicit `FieldMask` (`paths=["display_name", "description", "data_analytics_agent"]`). Implemented in `data_agent_from_agent_card.py` and `data_agent_manual_creation.py`. |
+| **`409 Resource 'projects/.../locations/global/dataAgents/<id>' already exists`** *(even after deleting the agent in the UI or via API)* | BigQuery Conversational Analytics **soft-deletes** `DataAgent` resources and retains the ID for **30 days** before permanent purge. Calling `create_data_agent()` with the same `data_agent_id` returns `409 AlreadyExists`. | Catch `google.api_core.exceptions.AlreadyExists` and call `update_data_agent()` with an explicit `FieldMask` (`paths=["display_name", "description", "data_analytics_agent"]`). Implemented in `deployer/reconcile.py`. |
 | **`AttributeError: type object 'Exception' has no attribute 'AlreadyExists'`** | Python's built-in `Exception` class does not define gRPC/Google API status exceptions. | Import `from google.api_core import exceptions` and catch `exceptions.AlreadyExists`. |
 | **`Client error '404 Not Found' for url '.../agents/<id>/.well-known/agent-card.json'`** | BigQuery Conversational Analytics does not serve its A2A card at `/.well-known/agent-card.json` under `/agents/`. | Fetch the live A2A Agent Card from the `/v1/a2a/.../v1/card` endpoint:<br>`https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}/v1/card` |
-| **Agent registration script returns `200 OK`, but agent does not appear in Google Cloud Agent Registry UI** | 1. `POST /services` returns a **Long-Running Operation (LRO)**; if the LRO fails asynchronously (e.g., due to a duplicate interface URL already owned by another service ID), the service is not created.<br>2. Missing required fields (`name`, `description`, `version`, `url`) in `agentSpec.content`. | Check existing services in both `global` and `us-central1` for matching `url` or `serviceId`. If found, update via `PATCH ?updateMask=agentSpec,displayName,description` instead of `POST`, and poll the LRO (`/v1/{operation_name}`) until `"done": true`. Implemented in `data_agent_from_agent_card.py`. |
+| **Agent registration script returns `200 OK`, but agent does not appear in Google Cloud Agent Registry UI** | 1. `POST /services` returns a **Long-Running Operation (LRO)**; if the LRO fails asynchronously (e.g., due to a duplicate interface URL already owned by another service ID), the service is not created.<br>2. Missing required fields (`name`, `description`, `version`, `url`) in `agentSpec.content`. | Check existing services in both `global` and `us-central1` for matching `url` or `serviceId`. If found, update via `PATCH ?updateMask=agentSpec,displayName,description` instead of `POST`, and poll the LRO (`/v1/{operation_name}`) until `"done": true`. Implemented in `deployer/registry.py`. |
 | **`The requested URL /v1/projects/<project>/locations/global/reasoningEngines was not found on this server`** *(during Terraform apply)* | Vertex AI Reasoning Engine (`aiplatform.googleapis.com`) is a **regional** resource and does not support `location = "global"`. | Set `location = "us-central1"` (or another supported region) in `terraform/variables.tf` and `test_bqca_a2a/cloudbuild.yaml`, while keeping `AGENT_REGISTRY_LOCATION = "global"` in `config.json`. |
 | **`Error waiting to create ReasoningEngine: Error code 3, message: Reasoning Engine resource [...] failed to start and cannot serve traffic`** | The container crashed during startup before FastAPI could bind to port `8080`. Common causes:<br>1. Missing `google-adk[a2a,agent-identity]` or `mcp` packages.<br>2. `AgentRegistry.get_remote_a2a_agent()` failed with `403 PERMISSION_DENIED` because the Reasoning Engine service agent lacked `roles/agentregistry.admin`. | 1. Include `google-adk[a2a,agent-identity]` and `mcp` in `test_bqca_a2a/requirements.txt`.<br>2. Grant `roles/agentregistry.admin` on the host project to `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`. |
-| **`Failed to initialize remote A2A agent: Failed to initialize remote A2A agent test_no_code_agent: no compatible transports found`** | Gemini Data Analytics returns `"preferredTransport": "HTTP_JSON"` (with an underscore `_`) in its A2A Agent Card, whereas `a2a-sdk` 1.x (`TransportProtocol.HTTP_JSON`) expects `"HTTP+JSON"` (with a plus `+`). | 1. Normalize `agent_card_json_data["preferredTransport"] = "HTTP+JSON"` in `data_agent_from_agent_card.py` before registering in Agent Registry.<br>2. In `AuthRemoteA2aAgent._ensure_resolved` (`test_bqca_a2a/agent.py`), normalize `iface.protocol_binding = "HTTP+JSON"` on `self._agent_card.supported_interfaces`. |
+| **`Failed to initialize remote A2A agent: Failed to initialize remote A2A agent test_no_code_agent: no compatible transports found`** | Gemini Data Analytics returns `"preferredTransport": "HTTP_JSON"` (with an underscore `_`) in its A2A Agent Card, whereas `a2a-sdk` 1.x (`TransportProtocol.HTTP_JSON`) expects `"HTTP+JSON"` (with a plus `+`). | 1. Normalize `agent_card_json_data["preferredTransport"] = "HTTP+JSON"` in `deployer/registry.py` before registering in Agent Registry.<br>2. In `AuthRemoteA2aAgent._ensure_resolved` (`test_bqca_a2a/agent.py`), normalize `iface.protocol_binding = "HTTP+JSON"` on `self._agent_card.supported_interfaces`. |
 | **`google.protobuf.json_format.ParseError: Failed to parse {'task': ...} field: unhashable type: 'dict'`** *(when sending A2A messages)* | In `google-adk` (`_compat.make_client_config`), `streaming` defaults to `True` on `a2a-sdk` 1.x, causing `a2a/compat/v0_3/rest_transport.py` to call `/v1/message:stream` and fail when parsing SSE task chunks. | Configure `A2AClientFactory` with `_compat.make_client_config(httpx_client=self._httpx_client, streaming=False, polling=False)` inside `AuthRemoteA2aAgent._ensure_httpx_client` (`test_bqca_a2a/agent.py`) so it calls `/v1/message:send` (non-streaming). |
-| **`Client error '400 Bad Request' for url 'https://agentregistry.googleapis.com/v1/projects/.../services?serviceId=...'`** | Google Cloud Agent Registry enforces a strict **63-character maximum length** on `service.display_name` and `serviceId`. Long agent IDs combined with suffixes exceed this limit (`display_name exceeds 63 characters`). | Truncate `service_id` (`data_agent_id.replace("_", "-")[:63].rstrip("-")`) and `displayName` (`displayName[:63]`) to at most 63 characters before calling `POST /services` or `PATCH /services`. Implemented in `data_agent_from_agent_card.py`. |
+| **`Client error '400 Bad Request' for url 'https://agentregistry.googleapis.com/v1/projects/.../services?serviceId=...'`** | Google Cloud Agent Registry enforces a strict **63-character maximum length** on `service.display_name` and `serviceId`. Long agent IDs combined with suffixes exceed this limit (`display_name exceeds 63 characters`). | Truncate `service_id` (`data_agent_id.replace("_", "-")[:63].rstrip("-")`) and `displayName` (`displayName[:63]`) to at most 63 characters before calling `POST /services` or `PATCH /services`. Implemented in `deployer/registry.py`. |
 | **`A2A request failed: HTTP Error 403: Client error '403 Forbidden' for url 'https://geminidataanalytics.googleapis.com/v1beta/a2a/projects/.../dataAgents/test_no_code_agent/v1/message:send'`** | When `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` calls `SendMessage`, Gemini Data Analytics invokes `DataChatService.ChatInternal` and queries BigQuery using the caller's identity. The `403` occurs if the service agent is missing:<br>1. `roles/cloudaicompanion.user` or `roles/serviceusage.serviceUsageConsumer` on the host project.<br>2. `roles/bigquery.jobUser` on the host project.<br>3. `roles/bigquery.dataViewer` on **any external project** hosting BigQuery tables referenced by the agent.<br>4. The `x-goog-user-project` header on outbound A2A requests. | 1. Grant `roles/cloudaicompanion.user`, `roles/serviceusage.serviceUsageConsumer`, `roles/bigquery.jobUser`, and `roles/bigquery.dataViewer` on the host project to `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`.<br>2. Grant `roles/bigquery.dataViewer` to `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` on all external projects hosting referenced BigQuery tables.<br>3. Set `request.headers["x-goog-user-project"] = PROJECT_ID` in `GoogleCloudAuth.auth_flow` (`test_bqca_a2a/agent.py`). |
 
 ---
@@ -156,7 +197,8 @@ Create the following triggers in the Google Cloud Console under **Cloud Build > 
 
 | Example Trigger Name | Cloud Build Config File Location | Required User-Defined Substitutions | Description |
 | :--- | :--- | :--- | :--- |
-| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Runs `data_agent_manual_creation.py` and `data_agent_from_agent_card.py` to create/update the BigQuery Conversational Analytics Data Agent and register its live A2A card in Google Cloud Agent Registry (`global` and `us-central1`). |
+| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Builds the cached deployer image, runs the unit tests, then runs `python -m deployer` to create/update only the changed Data Agents, sync Agent Registry (`global` and `us-central1`) and apply Gemini Enterprise egress IAM. |
+| **`plan-bq-data-agent`** *(pull requests)* | `/cloudbuild.yaml` | **`_DEPLOY_ARGS`**: `--dry-run` | Same pipeline in dry-run mode: reports planned `[CREATE]` / `[MODIFY]` / `[SKIP]` actions and missing IAM bindings without changing anything. |
 | **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `<YOUR_PROJECT_ID>`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
 | **`update-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/update_agent_cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID` and `$SHORT_SHA`)* | Fast container-only update pipeline: builds and pushes a new container image for `test_bqca_a2a` and runs `update_agent_deployment.sh` to directly `PATCH` the existing Reasoning Engine deployment without running Terraform. |
 
