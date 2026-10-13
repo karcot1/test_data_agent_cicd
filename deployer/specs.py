@@ -64,7 +64,17 @@ def parse_agent_card(
         ),
         None,
     )
-    params = (extension or {}).get("params", {}) or {}
+    if extension is None:
+        raise SpecError(
+            f"Agent card '{source}' has no '{BQ_EXTENSION_DESCRIPTION}' extension, so it carries no "
+            "tables, instructions or example queries. Cards copied from the BigQuery UI omit it; "
+            "export the card with: python -m deployer.export_card --source <agent> --out <file>"
+        )
+    params = extension.get("params", {}) or {}
+    if not params.get("table_info"):
+        raise SpecError(
+            f"Agent card '{source}': '{BQ_EXTENSION_DESCRIPTION}' lists no tables (params.table_info)."
+        )
 
     example_queries = []
     for nl_prompt, query_data in (params.get("example_queries") or {}).items():

@@ -1,9 +1,123 @@
 {
-  "protocolVersion": "0.3",
   "name": "test_agent_new_cicd",
   "description": "A quick test from a separate project, used to verify the CICD pipeline process.",
   "url": "https://geminidataanalytics.googleapis.com/v1/a2a/projects/mdk-test-project-487320/locations/global/dataAgents/agent_9caeba2a-c3f1-4e00-bc2d-072cd27802aa",
-  "preferredTransport": "HTTP+JSON",
+  "version": "1.0",
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/a2ui_thoughts/v1",
+        "description": "Gemini Enterprise A2UI Thoughts extension",
+        "params": {}
+      },
+      {
+        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.8",
+        "description": "Ability to render A2UI",
+        "params": {
+          "acceptsInlineCatalogs": false
+        }
+      },
+      {
+        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.9",
+        "description": "Ability to render A2UI",
+        "params": {
+          "acceptsInlineCatalogs": false
+        }
+      },
+      {
+        "uri": "https://cloud.google.com/bigquery/agent/extensions/sdui-chart/v1",
+        "description": "Ability to render SDUI charts",
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/client-id/v1",
+        "description": "Google Data Analytics Client ID extension",
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/datasource-references/v1",
+        "description": "Datasource references extension",
+        "params": {
+          "bq": {
+            "searchScope": {
+              "includeProjectIds": [],
+              "includeDatasetReferences": [
+                {
+                  "projectId": "",
+                  "datasetId": ""
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/authorizations/v1",
+        "description": "Google Gemini Enterprise authorization extension",
+        "params": {}
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/agent_feature_option/v1",
+        "description": "Google Gemini Enterprise agent feature option extension to show or hide UI options.",
+        "params": {
+          "allow_file_attachments": false,
+          "allow_tools": false
+        }
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/full_history_when_stateless/v1",
+        "description": "Google Gemini Enterprise stateless extension",
+        "params": {}
+      },
+      {
+        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/model/v1",
+        "description": "Gemini Enterprise Model extension",
+        "params": {
+          "supportedThinkingLevels": [
+            {
+              "id": "LOW",
+              "name": "Fast",
+              "description": "Answers quickly",
+              "launchStatusLabel": "Generally available"
+            },
+            {
+              "id": "HIGH",
+              "name": "Thinking",
+              "description": "Solves complex problems",
+              "launchStatusLabel": "Preview"
+            }
+          ],
+          "defaultThinkingLevelId": "LOW"
+        }
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/sse/v1",
+        "description": "Server-Sent Events (SSE) extension. Indicates that the agent supports SSE, prompting the calling system to add ?sse=true to the request URL.",
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/stateless/v1",
+        "description": "GDA Stateless extension",
+        "params": {}
+      },
+      {
+        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/bq-dataset/v1",
+        "description": "BQ Dataset Information",
+        "params": {
+          "system_instructions": "* Never attempt to query any objects outside of the existing knowledge sources, even if the data is public.\n\n* Never attempt to answer questions that do not directly pertain to the approved knowleddge source. ",
+          "example_queries": {
+            "How many rows in this table have a text with the first three letters of the alphabet?": [
+              "SELECT COUNT(*) AS count_of_rows\nFROM `gapinc-sandbox`.`query_costcontrol_test`.`test_table`\nWHERE LOWER(text) LIKE 'a%' OR LOWER(text) LIKE 'b%' OR LOWER(text) LIKE 'c%';"
+            ]
+          },
+          "table_info": [
+            "gapinc-sandbox.query_costcontrol_test.test_table"
+          ]
+        }
+      }
+    ]
+  },
   "defaultInputModes": [
     "text/plain",
     "application/json"
@@ -35,125 +149,7 @@
       ]
     }
   ],
-  "additionalInterfaces": [],
-  "provider": {
-    "url": "",
-    "organization": ""
-  },
-  "version": "1.0",
-  "documentationUrl": "",
-  "capabilities": {
-    "streaming": true,
-    "pushNotifications": false,
-    "extensions": [
-      {
-        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/a2ui_thoughts/v1",
-        "description": "Gemini Enterprise A2UI Thoughts extension",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.8",
-        "description": "Ability to render A2UI",
-        "required": false,
-        "params": {
-          "acceptsInlineCatalogs": false
-        }
-      },
-      {
-        "uri": "https://a2ui.org/a2a-extension/a2ui/v0.9",
-        "description": "Ability to render A2UI",
-        "required": false,
-        "params": {
-          "acceptsInlineCatalogs": false
-        }
-      },
-      {
-        "uri": "https://cloud.google.com/bigquery/agent/extensions/sdui-chart/v1",
-        "description": "Ability to render SDUI charts",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/client-id/v1",
-        "description": "Google Data Analytics Client ID extension",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/datasource-references/v1",
-        "description": "Datasource references extension",
-        "required": false,
-        "params": {
-          "bq": {
-            "searchScope": {
-              "includeProjectIds": [],
-              "includeDatasetReferences": [
-                {
-                  "projectId": "",
-                  "datasetId": ""
-                }
-              ]
-            }
-          }
-        }
-      },
-      {
-        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/authorizations/v1",
-        "description": "Google Gemini Enterprise authorization extension",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/agent_feature_option/v1",
-        "description": "Google Gemini Enterprise agent feature option extension to show or hide UI options.",
-        "required": false,
-        "params": {
-          "allow_file_attachments": false,
-          "allow_tools": false
-        }
-      },
-      {
-        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/full_history_when_stateless/v1",
-        "description": "Google Gemini Enterprise stateless extension",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://www.googleapis.com/gemini-enterprise/a2a/extensions/model/v1",
-        "description": "Gemini Enterprise Model extension",
-        "required": false,
-        "params": {
-          "supportedThinkingLevels": [
-            {
-              "id": "LOW",
-              "name": "Fast",
-              "description": "Answers quickly",
-              "launchStatusLabel": "Generally available"
-            },
-            {
-              "id": "HIGH",
-              "name": "Thinking",
-              "description": "Solves complex problems",
-              "launchStatusLabel": "Preview"
-            }
-          ],
-          "defaultThinkingLevelId": "LOW"
-        }
-      },
-      {
-        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/sse/v1",
-        "description": "Server-Sent Events (SSE) extension. Indicates that the agent supports SSE, prompting the calling system to add ?sse=true to the request URL.",
-        "required": false,
-        "params": {}
-      },
-      {
-        "uri": "https://docs.cloud.google.com/gemini/docs/conversational-analytics-api/reference/a2a/extensions/stateless/v1",
-        "description": "GDA Stateless extension",
-        "required": false,
-        "params": {}
-      }
-    ]
-  },
+  "preferredTransport": "HTTP+JSON",
+  "protocolVersion": "0.3",
   "iconUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxMDAiPjxwYXRoIGQ9Ik02LjczLDEwLjgzdjIuNjNBNC45MSw0LjkxLDAsMCwwLDguNDQsMTUuMlYxMC44M1oiLz48cGF0aCBkPSJNOS44OSw4LjQxdjcuNTNBNy42Miw3LjYyLDAsMCwwLDExLDE2LDgsOCwwLDAsMCwxMiwxNlY4LjQxWiIvPjxwYXRoIGQ9Ik0xMy42NCwxMS44NnYzLjI5YTUsNSwwLDAsMCwxLjctMS44MlYxMS44NloiLz48cGF0aCBkPSJNMTcuNzQsMTYuMzJsLTEuNDIsMS40MmEuNDIuNDIsMCwwLDAsMCwuNmwzLjU0LDMuNTRhLjQyLjQyLDAsMCwwLC41OSwwbDEuNDMtMS40M2EuNDIuNDIsMCwwLDAsMC0uNTlsLTMuNTQtMy41NGEuNDIuNDIsMCwwLDAtLjYsMCIvPjxwYXRoIGQ9Ik0xMSwyYTksOSwwLDEsMCw5LDksOSw5LDAsMCwwLTktOW0wLDE1LjY5QTYuNjgsNi42OCwwLDEsMSwxNy42OSwxMSw2LjY4LDYuNjgsMCwwLDEsMTEsMTcuNjkiLz48L3N2Zz4="
 }

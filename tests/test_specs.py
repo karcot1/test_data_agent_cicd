@@ -12,6 +12,7 @@ P, L = "my-project", "global"
 
 
 def card(**params):
+    params.setdefault("table_info", ["p.d.t"])
     return {
         "name": "demo",
         "description": "Demo agent",

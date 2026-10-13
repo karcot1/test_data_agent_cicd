@@ -24,6 +24,7 @@ The repository supports two core workflows:
 │   ├── registry.py                        # Agent Registry sync (global + us-central1)
 │   ├── iam.py                             # Gemini Enterprise IAP egress binding logic
 │   ├── ge_egress.py                       # Manual command: python -m deployer.ge_egress
+│   ├── export_card.py                     # python -m deployer.export_card: save a full agent card from the API
 │   └── auth.py                            # ADC with gcloud fallback
 ├── tests/                                 # Offline unit tests (no GCP calls)
 ├── cloudbuild.yaml                        # Build image → test → deploy
@@ -67,7 +68,14 @@ For every agent definition, the deployer:
 A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions (missing `name`, bad JSON, duplicate IDs) stop the run with exit code `2` before anything is changed.
 
 #### Adding an agent
-- **No-code:** export the A2A Agent Card from BigQuery and save it as `agent_cards/<anything>.json`. The Data Agent ID is `<card name>_no_code_agent`.
+- **No-code:** publish the agent in BigQuery, then export its card from the API:
+  ```bash
+  .venv/bin/python -m deployer.export_card \
+      --source projects/<SOURCE_PROJECT>/locations/global/dataAgents/<AGENT_ID> \
+      --out agent_cards/<anything>.json
+  ```
+  `--source` also accepts the card's `url`. The Data Agent ID it deploys as is `<card name>_no_code_agent`.
+  > **Don't copy the A2A JSON from the BigQuery UI.** That copy omits the `BQ Dataset Information` extension (tables, system instructions, example queries). The deployer rejects cards without it, so they can't create empty agents. The API card includes it.
 - **Low-code:** add `low_code_agents/<anything>.py` defining:
   ```python
   from google.cloud import geminidataanalytics
