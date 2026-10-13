@@ -4,7 +4,10 @@
 #    install only re-runs when requirements.txt changes.
 # 2. Run the offline unit tests.
 # 3. Run the deployer, which creates/updates only the agents whose definitions
-#    changed, syncs Agent Registry and applies Gemini Enterprise egress IAM.
+#    changed and syncs Agent Registry.
+#
+# Gemini Enterprise egress IAM is NOT part of this pipeline. After adding agents
+# to a GE app, run it manually: python -m deployer.ge_egress --project_id=...
 #
 # For a pull-request trigger, set the substitution _DEPLOY_ARGS=--dry-run.
 
@@ -50,6 +53,7 @@ steps:
 
   - id: 'deploy'
     name: '${_DEPLOYER_IMAGE}:${BUILD_ID}'
-    waitFor: ['test']
+    # Also wait for push-image: a failing deploy would otherwise cancel the push.
+    waitFor: ['test', 'push-image']
     entrypoint: 'bash'
     args: ['-c', 'python -m deployer --project_id=${PROJECT_ID} ${_DEPLOY_ARGS}']

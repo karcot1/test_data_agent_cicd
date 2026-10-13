@@ -3,7 +3,7 @@
 This repository provides CI/CD pipelines, Terraform modules, and Python scripts for automatically provisioning **BigQuery Conversational Analytics (Gemini Data Analytics) Agents**, registering them in **Google Cloud Agent Registry**, and orchestrating them from a **Vertex AI Reasoning Engine (Agent Engine) BYOC container** using the **Agent-to-Agent (A2A) protocol** and **Google Agent Development Kit (ADK)**.
 
 The repository supports two core workflows:
-1. **Data Agent CI/CD (`deployer/`)**: A single deployer (`python -m deployer`) that reads every agent definition in the repo, creates or updates **only** the BigQuery Conversational Analytics Data Agents whose definitions changed, registers no-code agents in Google Cloud Agent Registry, and grants Gemini Enterprise agent identities the IAP egress roles they need. Agents can be defined two ways:
+1. **Data Agent CI/CD (`deployer/`)**: A single deployer (`python -m deployer`) that reads every agent definition in the repo, creates or updates **only** the BigQuery Conversational Analytics Data Agents whose definitions changed and registers no-code agents in Google Cloud Agent Registry. A separate, manually-run command (`python -m deployer.ge_egress`) grants Gemini Enterprise agent identities the IAP egress roles they need. Agents can be defined two ways:
    - **No-code**: an A2A Agent Card exported from BigQuery, dropped into `agent_cards/`.
    - **Low-code**: a small Python module in `low_code_agents/` that builds the `DataAgent` with the `google-cloud-geminidataanalytics` SDK.
 2. **A2A Multi-Agent Orchestrator on Vertex AI Reasoning Engine (`test_bqca_a2a/`)**: Deploys a containerized Google ADK orchestrator agent (`test_bqca_a2a_agent`) on Vertex AI Reasoning Engine that discovers the BigQuery Conversational Analytics agent (`test_no_code_agent`) from Agent Registry and delegates natural language data analysis queries to it over authenticated A2A REST transport.
@@ -22,7 +22,8 @@ The repository supports two core workflows:
 │   ├── specs.py                           # Loads agent cards / low-code modules into AgentSpecs
 │   ├── reconcile.py                       # get → diff → CREATE / MODIFY / SKIP
 │   ├── registry.py                        # Agent Registry sync (global + us-central1)
-│   ├── iam.py                             # Gemini Enterprise IAP egress bindings
+│   ├── iam.py                             # Gemini Enterprise IAP egress binding logic
+│   ├── ge_egress.py                       # Manual command: python -m deployer.ge_egress
 │   └── auth.py                            # ADC with gcloud fallback
 ├── tests/                                 # Offline unit tests (no GCP calls)
 ├── cloudbuild.yaml                        # Build image → test → deploy
@@ -48,10 +49,10 @@ The repository supports two core workflows:
 
 ## 🚀 Key Components
 
-### 1. `deployer/` (Data Agent, Agent Registry & IAM CI/CD)
+### 1. `deployer/` (Data Agent & Agent Registry CI/CD)
 
 ```bash
-python -m deployer --project_id=<PROJECT_ID> [--dry-run] [--skip-registry] [--skip-iam]
+python -m deployer --project_id=<PROJECT_ID> [--dry-run] [--skip-registry]
                    [--no_code_dir=agent_cards] [--low_code_dir=low_code_agents] [--location=global]
 ```
 
@@ -62,7 +63,6 @@ For every agent definition, the deployer:
   - `[MODIFY]`: one or more fields changed. The changed fields are listed.
   - `[SKIP]`: already up to date. No API writes.
 - **Syncs Agent Registry** (no-code agents only) in `global` and `us-central1` when the agent was created/modified or is missing from a location. It fetches the live card from `.../dataAgents/{id}/v1/card`, normalizes `preferredTransport` to `HTTP+JSON` for `a2a-sdk` 1.x, then `PATCH`es or `POST`s the service and polls the operation.
-- **Applies Gemini Enterprise egress IAM.** It finds GE agents that front these Data Agents and adds (never removes) their principals to `roles/iap.viewer` + `roles/iap.egressor` on the project and `roles/iap.egressor` on `iap_web`.
 
 A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions (missing `name`, bad JSON, duplicate IDs) stop the run with exit code `2` before anything is changed.
 
@@ -82,6 +82,17 @@ A failure on one agent doesn't stop the others. The run prints a summary and exi
       )
   ```
   Leave `name` unset; the deployer fills it in from `AGENT_ID`. Files starting with `_` are ignored, so you can use them for shared helpers.
+
+#### Gemini Enterprise egress IAM (manual)
+This step is **not** in the pipeline. Run it only after you've added one or more Data Agents to a Gemini Enterprise app. Without it, GE calls to the agent fail with `403: Egress request is not authorized`.
+
+```bash
+.venv/bin/python -m deployer.ge_egress --project_id=<PROJECT_ID> --dry-run    # show missing bindings
+.venv/bin/python -m deployer.ge_egress --project_id=<PROJECT_ID>              # apply
+.venv/bin/python -m deployer.ge_egress --project_id=<PROJECT_ID> --agent_ids my_agent_no_code_agent
+```
+
+It finds the GE agents that front your Data Agents (all agents in the repo by default, or the ones in `--agent_ids`). It then adds (never removes) their principals to `roles/iap.viewer` + `roles/iap.egressor` on the project and `roles/iap.egressor` on `iap_web`. The person running it needs `roles/discoveryengine.viewer` plus permission to update IAM on the project (e.g. `roles/iam.securityAdmin`).
 
 #### Running locally
 ```bash
@@ -197,7 +208,7 @@ Create the following triggers in the Google Cloud Console under **Cloud Build > 
 
 | Example Trigger Name | Cloud Build Config File Location | Required User-Defined Substitutions | Description |
 | :--- | :--- | :--- | :--- |
-| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Builds the cached deployer image, runs the unit tests, then runs `python -m deployer` to create/update only the changed Data Agents, sync Agent Registry (`global` and `us-central1`) and apply Gemini Enterprise egress IAM. |
+| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Builds the cached deployer image, runs the unit tests, then runs `python -m deployer` to create/update only the changed Data Agents, and sync Agent Registry (`global` and `us-central1`). |
 | **`plan-bq-data-agent`** *(pull requests)* | `/cloudbuild.yaml` | **`_DEPLOY_ARGS`**: `--dry-run` | Same pipeline in dry-run mode: reports planned `[CREATE]` / `[MODIFY]` / `[SKIP]` actions and missing IAM bindings without changing anything. |
 | **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `<YOUR_PROJECT_ID>`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
 | **`update-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/update_agent_cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID` and `$SHORT_SHA`)* | Fast container-only update pipeline: builds and pushes a new container image for `test_bqca_a2a` and runs `update_agent_deployment.sh` to directly `PATCH` the existing Reasoning Engine deployment without running Terraform. |
