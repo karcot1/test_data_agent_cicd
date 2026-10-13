@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
 import httpx
 
 from deployer.specs import DEFAULT_DESCRIPTION
 
-REGISTRY_LOCATIONS = ("global", "us-central1")
+DEFAULT_REGISTRY_LOCATIONS = ("global",)
 REGISTRY_API = "https://agentregistry.googleapis.com/v1"
 GDA_A2A_API = "https://geminidataanalytics.googleapis.com/v1/a2a"
 MAX_NAME_LEN = 63
@@ -34,10 +35,18 @@ def find_service(services: list[dict], agent_id: str) -> dict | None:
 
 
 class AgentRegistry:
-    def __init__(self, client: httpx.Client, project_id: str, location: str = "global"):
+    def __init__(
+        self,
+        client: httpx.Client,
+        project_id: str,
+        location: str = "global",
+        registry_locations: Sequence[str] = DEFAULT_REGISTRY_LOCATIONS,
+    ):
         self.client = client
         self.project_id = project_id
         self.location = location  # Data Agent location
+        # Agent Registry entries are per-location and not replicated between locations.
+        self.registry_locations = tuple(dict.fromkeys(registry_locations))
         self._services: dict[str, list[dict]] = {}
 
     def services(self, reg_location: str) -> list[dict]:
@@ -51,7 +60,9 @@ class AgentRegistry:
 
     def missing_locations(self, agent_id: str) -> list[str]:
         return [
-            loc for loc in REGISTRY_LOCATIONS if find_service(self.services(loc), agent_id) is None
+            loc
+            for loc in self.registry_locations
+            if find_service(self.services(loc), agent_id) is None
         ]
 
     def _build_payload(self, agent_id: str, card_data: dict) -> dict:
@@ -97,7 +108,7 @@ class AgentRegistry:
 
     def sync(self, agent_id: str, card_data: dict) -> None:
         payload = self._build_payload(agent_id, card_data)
-        for reg_location in REGISTRY_LOCATIONS:
+        for reg_location in self.registry_locations:
             existing = find_service(self.services(reg_location), agent_id)
             if existing:
                 print(f"    Agent Registry ({reg_location}): updating {existing['name']}")

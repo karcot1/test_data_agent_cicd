@@ -21,7 +21,7 @@ The repository supports two core workflows:
 │   ├── cli.py                             # Entrypoint: load → reconcile → Agent Registry → IAM → summary
 │   ├── specs.py                           # Loads agent cards / low-code modules into AgentSpecs
 │   ├── reconcile.py                       # get → diff → CREATE / MODIFY / SKIP
-│   ├── registry.py                        # Agent Registry sync (global + us-central1)
+│   ├── registry.py                        # Agent Registry sync (locations configurable, default: global)
 │   ├── iam.py                             # Gemini Enterprise IAP egress binding logic
 │   ├── ge_egress.py                       # Manual command: python -m deployer.ge_egress
 │   ├── export_card.py                     # python -m deployer.export_card: save a full agent card from the API
@@ -54,6 +54,7 @@ The repository supports two core workflows:
 
 ```bash
 python -m deployer --project_id=<PROJECT_ID> [--dry-run] [--skip-registry]
+                   [--registry_locations global [us-central1 ...]]
                    [--no_code_dir=agent_cards] [--low_code_dir=low_code_agents] [--location=global]
 ```
 
@@ -63,9 +64,12 @@ For every agent definition, the deployer:
   - `[CREATE]`: the agent doesn't exist. A soft-deleted ID (`409 AlreadyExists`, 30-day retention) is restored in place with `update_data_agent()`.
   - `[MODIFY]`: one or more fields changed. The changed fields are listed.
   - `[SKIP]`: already up to date. No API writes.
-- **Syncs Agent Registry** (no-code agents only) in `global` and `us-central1` when the agent was created/modified or is missing from a location. It fetches the live card from `.../dataAgents/{id}/v1/card`, normalizes `preferredTransport` to `HTTP+JSON` for `a2a-sdk` 1.x, then `PATCH`es or `POST`s the service and polls the operation.
+- **Syncs Agent Registry** (no-code agents only) in each location listed in `--registry_locations` (default: `global`) when the agent was created/modified or is missing from a location. It fetches the live card from `.../dataAgents/{id}/v1/card`, normalizes `preferredTransport` to `HTTP+JSON` for `a2a-sdk` 1.x, then `PATCH`es or `POST`s the service and polls the operation.
 
 A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions (missing `name`, bad JSON, duplicate IDs) stop the run with exit code `2` before anything is changed.
+
+> [!NOTE]
+> Agent Registry entries are stored per location and are **not** replicated between locations. Publish to more than `global` only if a consumer reads from another location, for example `_DEPLOY_ARGS="--registry_locations global us-central1"` on the Cloud Build trigger. Entries that already exist in other locations are left in place; delete them manually if they're no longer needed.
 
 #### Adding an agent
 - **No-code:** publish the agent in BigQuery, then export its card from the API:
@@ -196,7 +200,7 @@ Below is a reference of common errors encountered when deploying BigQuery Conver
 | **`409 Resource 'projects/.../locations/global/dataAgents/<id>' already exists`** *(even after deleting the agent in the UI or via API)* | BigQuery Conversational Analytics **soft-deletes** `DataAgent` resources and retains the ID for **30 days** before permanent purge. Calling `create_data_agent()` with the same `data_agent_id` returns `409 AlreadyExists`. | Catch `google.api_core.exceptions.AlreadyExists` and call `update_data_agent()` with an explicit `FieldMask` (`paths=["display_name", "description", "data_analytics_agent"]`). Implemented in `deployer/reconcile.py`. |
 | **`AttributeError: type object 'Exception' has no attribute 'AlreadyExists'`** | Python's built-in `Exception` class does not define gRPC/Google API status exceptions. | Import `from google.api_core import exceptions` and catch `exceptions.AlreadyExists`. |
 | **`Client error '404 Not Found' for url '.../agents/<id>/.well-known/agent-card.json'`** | BigQuery Conversational Analytics does not serve its A2A card at `/.well-known/agent-card.json` under `/agents/`. | Fetch the live A2A Agent Card from the `/v1/a2a/.../v1/card` endpoint:<br>`https://geminidataanalytics.googleapis.com/v1/a2a/projects/{project_id}/locations/{location}/dataAgents/{data_agent_id}/v1/card` |
-| **Agent registration script returns `200 OK`, but agent does not appear in Google Cloud Agent Registry UI** | 1. `POST /services` returns a **Long-Running Operation (LRO)**; if the LRO fails asynchronously (e.g., due to a duplicate interface URL already owned by another service ID), the service is not created.<br>2. Missing required fields (`name`, `description`, `version`, `url`) in `agentSpec.content`. | Check existing services in both `global` and `us-central1` for matching `url` or `serviceId`. If found, update via `PATCH ?updateMask=agentSpec,displayName,description` instead of `POST`, and poll the LRO (`/v1/{operation_name}`) until `"done": true`. Implemented in `deployer/registry.py`. |
+| **Agent registration script returns `200 OK`, but agent does not appear in Google Cloud Agent Registry UI** | 1. `POST /services` returns a **Long-Running Operation (LRO)**; if the LRO fails asynchronously (e.g., due to a duplicate interface URL already owned by another service ID), the service is not created.<br>2. Missing required fields (`name`, `description`, `version`, `url`) in `agentSpec.content`. | Check existing services in each configured registry location for matching `url` or `serviceId`. If found, update via `PATCH ?updateMask=agentSpec,displayName,description` instead of `POST`, and poll the LRO (`/v1/{operation_name}`) until `"done": true`. Implemented in `deployer/registry.py`. |
 | **`The requested URL /v1/projects/<project>/locations/global/reasoningEngines was not found on this server`** *(during Terraform apply)* | Vertex AI Reasoning Engine (`aiplatform.googleapis.com`) is a **regional** resource and does not support `location = "global"`. | Set `location = "us-central1"` (or another supported region) in `terraform/variables.tf` and `test_bqca_a2a/cloudbuild.yaml`, while keeping `AGENT_REGISTRY_LOCATION = "global"` in `config.json`. |
 | **`Error waiting to create ReasoningEngine: Error code 3, message: Reasoning Engine resource [...] failed to start and cannot serve traffic`** | The container crashed during startup before FastAPI could bind to port `8080`. Common causes:<br>1. Missing `google-adk[a2a,agent-identity]` or `mcp` packages.<br>2. `AgentRegistry.get_remote_a2a_agent()` failed with `403 PERMISSION_DENIED` because the Reasoning Engine service agent lacked `roles/agentregistry.admin`. | 1. Include `google-adk[a2a,agent-identity]` and `mcp` in `test_bqca_a2a/requirements.txt`.<br>2. Grant `roles/agentregistry.admin` on the host project to `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`. |
 | **`Failed to initialize remote A2A agent: Failed to initialize remote A2A agent test_no_code_agent: no compatible transports found`** | Gemini Data Analytics returns `"preferredTransport": "HTTP_JSON"` (with an underscore `_`) in its A2A Agent Card, whereas `a2a-sdk` 1.x (`TransportProtocol.HTTP_JSON`) expects `"HTTP+JSON"` (with a plus `+`). | 1. Normalize `agent_card_json_data["preferredTransport"] = "HTTP+JSON"` in `deployer/registry.py` before registering in Agent Registry.<br>2. In `AuthRemoteA2aAgent._ensure_resolved` (`test_bqca_a2a/agent.py`), normalize `iface.protocol_binding = "HTTP+JSON"` on `self._agent_card.supported_interfaces`. |
@@ -216,7 +220,7 @@ Create the following triggers in the Google Cloud Console under **Cloud Build > 
 
 | Example Trigger Name | Cloud Build Config File Location | Required User-Defined Substitutions | Description |
 | :--- | :--- | :--- | :--- |
-| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Builds the cached deployer image, runs the unit tests, then runs `python -m deployer` to create/update only the changed Data Agents, and sync Agent Registry (`global` and `us-central1`). |
+| **`deploy-bq-data-agent`** | `/cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID`)* | Builds the cached deployer image, runs the unit tests, then runs `python -m deployer` to create/update only the changed Data Agents, and sync Agent Registry (`global` by default). |
 | **`plan-bq-data-agent`** *(pull requests)* | `/cloudbuild.yaml` | **`_DEPLOY_ARGS`**: `--dry-run` | Same pipeline in dry-run mode: reports planned `[CREATE]` / `[MODIFY]` / `[SKIP]` actions and missing IAM bindings without changing anything. |
 | **`deploy-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/cloudbuild.yaml` | **`_PROJECT_ID`**: `<your-project-id>` *(e.g., `<YOUR_PROJECT_ID>`)*<br>**`_LOCATION`**: `<region>` *(e.g., `us-central1`)* | Builds the ADK orchestrator container image (`test_bqca_a2a`), pushes it to Artifact Registry (`us-docker.pkg.dev/${PROJECT_ID}/agent-repo/test_bqca_a2a:${SHORT_SHA}`), and runs Terraform (`terraform/`) to provision or update the Vertex AI Reasoning Engine resource. |
 | **`update-bqca-a2a-reasoning-engine`** | `/test_bqca_a2a/update_agent_cloudbuild.yaml` | *None*<br>*(Uses built-in `$PROJECT_ID` and `$SHORT_SHA`)* | Fast container-only update pipeline: builds and pushes a new container image for `test_bqca_a2a` and runs `update_agent_deployment.sh` to directly `PATCH` the existing Reasoning Engine deployment without running Terraform. |

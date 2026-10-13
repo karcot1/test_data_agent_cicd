@@ -15,7 +15,7 @@ from google.cloud import geminidataanalytics
 from deployer import specs
 from deployer.auth import auth_headers, get_credentials
 from deployer.reconcile import CREATE, ERROR, MODIFY, SKIP, Result, reconcile
-from deployer.registry import AgentRegistry
+from deployer.registry import DEFAULT_REGISTRY_LOCATIONS, AgentRegistry
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -30,6 +30,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--low_code_dir", default="low_code_agents", help="Folder of low-code agent modules")
     parser.add_argument("--dry-run", action="store_true", help="Report planned changes without applying them")
     parser.add_argument("--skip-registry", action="store_true", help="Skip Agent Registry sync")
+    parser.add_argument(
+        "--registry_locations",
+        nargs="+",
+        default=list(DEFAULT_REGISTRY_LOCATIONS),
+        help="Agent Registry locations to publish no-code agents to (default: global). "
+        "Example: --registry_locations global us-central1",
+    )
     return parser.parse_args(argv)
 
 
@@ -91,7 +98,9 @@ def main(argv: list[str] | None = None) -> None:
 
     results: list[Result] = []
     with httpx.Client(headers=auth_headers(credentials, args.project_id), timeout=60.0) as http:
-        registry = None if args.skip_registry else AgentRegistry(http, args.project_id, args.location)
+        registry = None if args.skip_registry else AgentRegistry(
+            http, args.project_id, args.location, registry_locations=args.registry_locations
+        )
 
         for spec in all_specs:
             try:

@@ -42,8 +42,26 @@ def test_missing_locations_uses_cached_lists():
         return httpx.Response(200, json={})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    reg = registry.AgentRegistry(client, "p")
+    reg = registry.AgentRegistry(client, "p", registry_locations=["global", "us-central1"])
 
     assert reg.missing_locations("my_agent") == ["us-central1"]
     assert reg.missing_locations("other_agent") == ["global", "us-central1"]
     assert len(calls) == 2  # one list call per location, then cached
+
+
+def test_default_registry_location_is_global_only():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json={})
+
+    reg = registry.AgentRegistry(httpx.Client(transport=httpx.MockTransport(handler)), "p")
+    assert reg.registry_locations == ("global",)
+    assert reg.missing_locations("my_agent") == ["global"]
+    assert calls == ["/v1/projects/p/locations/global/services"]
+
+
+def test_registry_locations_deduplicated():
+    reg = registry.AgentRegistry(httpx.Client(), "p", registry_locations=["global", "global", "us-central1"])
+    assert reg.registry_locations == ("global", "us-central1")
