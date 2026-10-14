@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Sync no-code Data Agents' live A2A cards into Google Cloud Agent Registry."""
 
 from __future__ import annotations
@@ -7,12 +21,14 @@ from collections.abc import Sequence
 
 import httpx
 
-from deployer.specs import DEFAULT_DESCRIPTION
+from deployer.endpoints import a2a_agent_url
 
 DEFAULT_REGISTRY_LOCATIONS = ("global",)
+DEFAULT_DESCRIPTION = "Enterprise data agent for natural language BigQuery reporting."
 REGISTRY_API = "https://agentregistry.googleapis.com/v1"
-GDA_A2A_API = "https://geminidataanalytics.googleapis.com/v1/a2a"
 MAX_NAME_LEN = 63
+OPERATION_POLL_SECONDS = 1
+OPERATION_TIMEOUT_SECONDS = 60
 
 
 def service_id_for(agent_id: str) -> str:
@@ -65,23 +81,18 @@ class AgentRegistry:
             if find_service(self.services(loc), agent_id) is None
         ]
 
-    def _build_payload(self, agent_id: str, card_data: dict) -> dict:
-        card_url = (
-            f"{GDA_A2A_API}/projects/{self.project_id}/locations/{self.location}"
-            f"/dataAgents/{agent_id}"
-        )
+    def _build_payload(self, agent_id: str, description: str) -> dict:
+        card_url = a2a_agent_url(self.project_id, self.location, agent_id)
         resp = self.client.get(f"{card_url}/v1/card")
         resp.raise_for_status()
         card = resp.json()
 
         # Fill fields Agent Registry requires for indexing.
         card["name"] = card.get("name") or agent_id
-        card["description"] = (
-            card.get("description") or card_data.get("description") or DEFAULT_DESCRIPTION
-        )
+        card["description"] = card.get("description") or description or DEFAULT_DESCRIPTION
         card["version"] = card.get("version") or "1.0.0"
         card["url"] = card.get("url") or card_url
-        # Gemini Data Analytics returns "HTTP_JSON"; a2a-sdk 1.x expects "HTTP+JSON".
+        # Some Gemini Data Analytics endpoints return "HTTP_JSON"; a2a-sdk expects "HTTP+JSON".
         card["preferredTransport"] = "HTTP+JSON"
 
         return {
@@ -94,10 +105,14 @@ class AgentRegistry:
         op_name = op_data.get("name", "")
         if "/operations/" not in op_name:
             return
-        for _ in range(30):
-            if op_data.get("done"):
-                break
-            time.sleep(1)
+        deadline = time.monotonic() + OPERATION_TIMEOUT_SECONDS
+        while not op_data.get("done"):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Agent Registry operation {op_name} in '{reg_location}' did not finish "
+                    f"within {OPERATION_TIMEOUT_SECONDS}s."
+                )
+            time.sleep(OPERATION_POLL_SECONDS)
             resp = self.client.get(f"{REGISTRY_API}/{op_name}")
             resp.raise_for_status()
             op_data = resp.json()
@@ -106,8 +121,8 @@ class AgentRegistry:
                 f"Agent Registry operation failed in '{reg_location}': {op_data['error']}"
             )
 
-    def sync(self, agent_id: str, card_data: dict) -> None:
-        payload = self._build_payload(agent_id, card_data)
+    def sync(self, agent_id: str, description: str = "") -> None:
+        payload = self._build_payload(agent_id, description)
         for reg_location in self.registry_locations:
             existing = find_service(self.services(reg_location), agent_id)
             if existing:

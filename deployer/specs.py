@@ -1,4 +1,43 @@
-"""Load agent definitions (no-code A2A cards and low-code Python modules) into AgentSpecs."""
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Load agent definitions (no-code JSON configs and low-code Python modules) into AgentSpecs.
+
+No-code agents are declarative JSON files in agent_configs/ (see agent_configs/_template.json):
+
+    {
+      "agent_id": "sales_agent",                      # required, Data Agent ID
+      "display_name": "Sales agent",
+      "description": "Answers questions about sales.",
+      "source_project_id": "my-dev-project",          # optional, see below
+      "system_instruction": "...",
+      "table_references": [                           # required, at least one
+        {"project_id": "...", "dataset_id": "...", "table_id": "..."}
+      ],
+      "example_queries": [
+        {"natural_language_question": "...", "sql_query": "...",
+         "parameters": [{"name": "...", "description": "...", "data_type": "..."}]}
+      ],
+      "glossary_terms": [{"display_name": "...", "description": "...", "labels": ["..."]}],
+      "options": {"python_enabled": false}
+    }
+
+When source_project_id is set and differs from the target project, every reference to
+that project (table references, example SQL and the system instruction) is rewritten to
+the target project. References to any other project, such as bigquery-public-data, are
+left untouched.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +45,31 @@ import glob
 import importlib.util
 import json
 import os
+import re
 from dataclasses import dataclass
 
 from google.cloud import geminidataanalytics
 
-DEFAULT_DESCRIPTION = "Enterprise data agent for natural language BigQuery reporting."
-BQ_EXTENSION_DESCRIPTION = "BQ Dataset Information"
+# Data Agent IDs accepted by the API: a lowercase letter, then up to 62 lowercase
+# letters, digits, underscores or hyphens.
+AGENT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
+
+CONFIG_KEYS = {
+    "agent_id",
+    "display_name",
+    "description",
+    "source_project_id",
+    "system_instruction",
+    "table_references",
+    "example_queries",
+    "glossary_terms",
+    "options",
+}
+TABLE_KEYS = {"project_id", "dataset_id", "table_id"}
+EXAMPLE_QUERY_KEYS = {"natural_language_question", "sql_query", "parameters"}
+PARAMETER_KEYS = {"name", "description", "data_type"}
+GLOSSARY_TERM_KEYS = {"display_name", "description", "labels"}
+OPTION_KEYS = {"python_enabled"}
 
 
 class SpecError(ValueError):
@@ -23,125 +81,161 @@ class AgentSpec:
     agent_id: str
     source: str
     data_agent: geminidataanalytics.DataAgent
-    # Original A2A card for no-code agents (triggers Agent Registry sync); None for low-code.
-    card_data: dict | None = None
+    # No-code agents are also published to Agent Registry; low-code agents are not.
+    register: bool = False
 
 
 def agent_resource_name(project_id: str, location: str, agent_id: str) -> str:
     return f"projects/{project_id}/locations/{location}/dataAgents/{agent_id}"
 
 
-# ---------------------------------------------------------------------------
-# No-code agents (A2A agent cards)
-# ---------------------------------------------------------------------------
-
-def _query_parameter(raw, source: str) -> geminidataanalytics.QueryParameter:
-    """Card parameters may be a bare name string or a {name, description, data_type} dict."""
-    if isinstance(raw, str):
-        return geminidataanalytics.QueryParameter(name=raw)
-    if isinstance(raw, dict):
-        unknown = set(raw) - {"name", "description", "data_type"}
-        if unknown:
-            raise SpecError(f"Agent card '{source}': unknown query parameter keys {sorted(unknown)}.")
-        return geminidataanalytics.QueryParameter(**raw)
-    raise SpecError(f"Agent card '{source}': query parameter must be a string or object, got {raw!r}.")
-
-
-def parse_agent_card(
-    data: dict, source: str, project_id: str, location: str
-) -> AgentSpec:
-    card_name = data.get("name")
-    if not card_name:
-        raise SpecError(f"Agent card '{source}' is missing required 'name' field.")
-
-    agent_id = f"{card_name}_no_code_agent"
-
-    extension = next(
-        (
-            ext
-            for ext in (data.get("capabilities") or {}).get("extensions", [])
-            if ext.get("description") == BQ_EXTENSION_DESCRIPTION
-        ),
-        None,
-    )
-    if extension is None:
+def validate_agent_id(agent_id, source: str) -> str:
+    if not isinstance(agent_id, str) or not AGENT_ID_RE.match(agent_id):
         raise SpecError(
-            f"Agent card '{source}' has no '{BQ_EXTENSION_DESCRIPTION}' extension, so it carries no "
-            "tables, instructions or example queries. Cards copied from the BigQuery UI omit it; "
-            "export the card with: python -m deployer.export_card --source <agent> --out <file>"
+            f"'{source}': agent_id {agent_id!r} must start with a lowercase letter and contain "
+            "only lowercase letters, digits, '_' or '-' (max 63 characters)."
         )
-    params = extension.get("params", {}) or {}
-    if not params.get("table_info"):
-        raise SpecError(
-            f"Agent card '{source}': '{BQ_EXTENSION_DESCRIPTION}' lists no tables (params.table_info)."
+    return agent_id
+
+
+# ---------------------------------------------------------------------------
+# No-code agents (declarative JSON configs)
+# ---------------------------------------------------------------------------
+
+def _check_object(obj, allowed: set[str], required: set[str], where: str) -> dict:
+    if not isinstance(obj, dict):
+        raise SpecError(f"{where} must be an object, got {type(obj).__name__}.")
+    unknown = set(obj) - allowed
+    if unknown:
+        raise SpecError(f"{where} has unknown keys {sorted(unknown)}; allowed: {sorted(allowed)}.")
+    for key in sorted(required):
+        if not isinstance(obj.get(key), str) or not obj[key].strip():
+            raise SpecError(f"{where} requires a non-empty string '{key}'.")
+    return obj
+
+
+def _check_list(value, where: str) -> list:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SpecError(f"{where} must be a list, got {type(value).__name__}.")
+    return value
+
+
+def _project_rewriter(source_project_id: str | None, target_project_id: str):
+    """Return a function that rewrites `<source_project_id>.` references to the target project."""
+    if not source_project_id or source_project_id == target_project_id:
+        return lambda text: text
+    # Don't match the source ID inside a longer project ID (e.g. "my-dev" in "team-my-dev").
+    pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(source_project_id)}\.")
+    return lambda text: pattern.sub(f"{target_project_id}.", text)
+
+
+def parse_agent_config(data, source: str, project_id: str, location: str) -> AgentSpec:
+    """Validate a JSON agent config and build the desired DataAgent for `project_id`."""
+    _check_object(data, CONFIG_KEYS, {"agent_id"}, f"Agent config '{source}'")
+    agent_id = validate_agent_id(data["agent_id"], source)
+
+    source_project_id = data.get("source_project_id")
+    if source_project_id is not None and not isinstance(source_project_id, str):
+        raise SpecError(f"'{source}': source_project_id must be a string.")
+    rewrite = _project_rewriter(source_project_id, project_id)
+
+    tables = _check_list(data.get("table_references"), f"'{source}': table_references")
+    if not tables:
+        raise SpecError(f"'{source}': table_references must list at least one table.")
+    table_references = []
+    for i, table in enumerate(tables):
+        _check_object(table, TABLE_KEYS, TABLE_KEYS, f"'{source}': table_references[{i}]")
+        table_project = table["project_id"]
+        if table_project == source_project_id:
+            table_project = project_id
+        table_references.append(
+            geminidataanalytics.BigQueryTableReference(
+                project_id=table_project,
+                dataset_id=table["dataset_id"],
+                table_id=table["table_id"],
+            )
         )
 
     example_queries = []
-    for nl_prompt, query_data in (params.get("example_queries") or {}).items():
-        # List format: [sql_query, *optional_parameters]
-        if isinstance(query_data, list) and query_data:
-            sql, raw_parameters = query_data[0], query_data[1:]
-        else:
-            sql, raw_parameters = str(query_data), []
+    for i, query in enumerate(_check_list(data.get("example_queries"), f"'{source}': example_queries")):
+        where = f"'{source}': example_queries[{i}]"
+        _check_object(query, EXAMPLE_QUERY_KEYS, {"natural_language_question", "sql_query"}, where)
+        parameters = [
+            geminidataanalytics.QueryParameter(
+                **_check_object(param, PARAMETER_KEYS, {"name"}, f"{where}.parameters[{j}]")
+            )
+            for j, param in enumerate(_check_list(query.get("parameters"), f"{where}.parameters"))
+        ]
         example_queries.append(
             geminidataanalytics.ExampleQuery(
-                natural_language_question=nl_prompt,
-                sql_query=sql,
-                parameters=[_query_parameter(p, source) for p in raw_parameters],
+                natural_language_question=query["natural_language_question"],
+                sql_query=rewrite(query["sql_query"]),
+                parameters=parameters,
             )
         )
 
-    table_references = []
-    for table in params.get("table_info") or []:
-        parts = table.split(".", 2)
-        if len(parts) != 3:
-            raise SpecError(
-                f"Agent card '{source}': table '{table}' must be 'project.dataset.table'."
-            )
-        proj_id, ds_id, tbl_id = parts
-        table_references.append(
-            geminidataanalytics.BigQueryTableReference(
-                project_id=proj_id, dataset_id=ds_id, table_id=tbl_id
+    glossary_terms = []
+    for i, term in enumerate(_check_list(data.get("glossary_terms"), f"'{source}': glossary_terms")):
+        where = f"'{source}': glossary_terms[{i}]"
+        _check_object(term, GLOSSARY_TERM_KEYS, {"display_name"}, where)
+        labels = _check_list(term.get("labels"), f"{where}.labels")
+        if not all(isinstance(label, str) for label in labels):
+            raise SpecError(f"{where}.labels must be a list of strings.")
+        glossary_terms.append(
+            geminidataanalytics.GlossaryTerm(
+                display_name=term["display_name"],
+                description=term.get("description", ""),
+                labels=labels,
             )
         )
+
+    options = _check_object(data.get("options") or {}, OPTION_KEYS, set(), f"'{source}': options")
+    python_enabled = options.get("python_enabled", False)
+    if not isinstance(python_enabled, bool):
+        raise SpecError(f"'{source}': options.python_enabled must be true or false.")
+
+    for key in ("display_name", "description", "system_instruction"):
+        if not isinstance(data.get(key, ""), str):
+            raise SpecError(f"'{source}': {key} must be a string.")
 
     published_context = geminidataanalytics.Context(
-        system_instruction=params.get("system_instructions", ""),
+        system_instruction=rewrite(data.get("system_instruction", "")),
         datasource_references=geminidataanalytics.DatasourceReferences(
-            bq=geminidataanalytics.BigQueryTableReferences(
-                table_references=table_references
-            )
+            bq=geminidataanalytics.BigQueryTableReferences(table_references=table_references)
         ),
         example_queries=example_queries,
+        glossary_terms=glossary_terms,
         options=geminidataanalytics.ConversationOptions(
             analysis=geminidataanalytics.AnalysisOptions(
-                python=geminidataanalytics.AnalysisOptions.Python(enabled=False)
+                python=geminidataanalytics.AnalysisOptions.Python(enabled=python_enabled)
             )
         ),
     )
-
     data_agent = geminidataanalytics.DataAgent(
         name=agent_resource_name(project_id, location, agent_id),
-        display_name=agent_id,
-        description=data.get("description") or DEFAULT_DESCRIPTION,
+        display_name=data.get("display_name", ""),
+        description=data.get("description", ""),
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=published_context
         ),
     )
-    return AgentSpec(
-        agent_id=agent_id, source=source, data_agent=data_agent, card_data=data
-    )
+    return AgentSpec(agent_id=agent_id, source=source, data_agent=data_agent, register=True)
 
 
-def load_no_code_specs(directory: str, project_id: str, location: str) -> list[AgentSpec]:
+def load_agent_configs(directory: str, project_id: str, location: str) -> list[AgentSpec]:
+    """Load every *.json in `directory`, except files starting with '_' (e.g. _template.json)."""
     specs = []
     for path in sorted(glob.glob(os.path.join(directory, "*.json"))):
+        if os.path.basename(path).startswith("_"):
+            continue
         with open(path, "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                raise SpecError(f"Agent card '{path}' is not valid JSON: {e}") from e
-        specs.append(parse_agent_card(data, path, project_id, location))
+                raise SpecError(f"Agent config '{path}' is not valid JSON: {e}") from e
+        specs.append(parse_agent_config(data, path, project_id, location))
     return specs
 
 
@@ -162,9 +256,7 @@ def _import_module_from_path(path: str):
 def load_low_code_spec(path: str, project_id: str, location: str) -> AgentSpec:
     module = _import_module_from_path(path)
 
-    agent_id = getattr(module, "AGENT_ID", None)
-    if not isinstance(agent_id, str) or not agent_id:
-        raise SpecError(f"Low-code agent '{path}' must define a non-empty AGENT_ID string.")
+    agent_id = validate_agent_id(getattr(module, "AGENT_ID", None), path)
 
     build_agent = getattr(module, "build_agent", None)
     if not callable(build_agent):

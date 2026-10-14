@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Data Agent CI/CD pipeline.
 #
 # 1. Build a dependencies-only image (cached from the previous :latest), so pip
@@ -10,6 +24,10 @@
 # to a GE app, run it manually: python -m deployer.ge_egress --project_id=...
 #
 # For a pull-request trigger, set the substitution _DEPLOY_ARGS=--dry-run.
+#
+# Prerequisite: the Artifact Registry repository in _DEPLOYER_IMAGE must exist.
+# Create it once with:
+#   gcloud artifacts repositories create agent-repo --repository-format=docker --location=us
 
 substitutions:
   _DEPLOYER_IMAGE: us-docker.pkg.dev/${PROJECT_ID}/agent-repo/agent-deployer
