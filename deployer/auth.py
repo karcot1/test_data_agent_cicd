@@ -17,8 +17,13 @@
 import subprocess
 
 import google.auth
+import google.auth.exceptions
 import google.auth.transport.requests
 import google.oauth2.credentials
+
+
+class AuthError(RuntimeError):
+    """Raised when no usable Google Cloud credentials are found."""
 
 
 def get_credentials():
@@ -29,10 +34,16 @@ def get_credentials():
         )
         credentials.refresh(google.auth.transport.requests.Request())
         return credentials
-    except Exception:
-        token = subprocess.check_output(
-            ["gcloud", "auth", "print-access-token"], text=True
-        ).strip()
+    except google.auth.exceptions.GoogleAuthError as adc_error:
+        try:
+            token = subprocess.check_output(
+                ["gcloud", "auth", "print-access-token"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            raise AuthError(
+                f"No Google Cloud credentials found ({adc_error}). "
+                "Run: gcloud auth application-default login"
+            ) from adc_error
         return google.oauth2.credentials.Credentials(token=token)
 
 

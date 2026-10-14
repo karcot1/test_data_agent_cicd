@@ -26,7 +26,7 @@ import sys
 import httpx
 
 from deployer import specs
-from deployer.auth import auth_headers, get_credentials
+from deployer.auth import AuthError, auth_headers, get_credentials
 from deployer.endpoints import data_agent_client
 from deployer.reconcile import CREATE, ERROR, MODIFY, SKIP, Result, reconcile
 from deployer.registry import DEFAULT_REGISTRY_LOCATIONS, AgentRegistry
@@ -39,7 +39,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "and sync them to Agent Registry.",
     )
     parser.add_argument("--project_id", required=True, help="Target GCP project ID")
-    parser.add_argument("--location", default="global", help="Data Agent location (default: global)")
+    parser.add_argument(
+        "--location", default="global", type=str.lower, help="Data Agent location (default: global)"
+    )
     parser.add_argument("--config_dir", default="agent_configs", help="Folder of no-code agent JSON configs")
     parser.add_argument("--low_code_dir", default="low_code_agents", help="Folder of low-code agent modules")
     parser.add_argument("--dry-run", action="store_true", help="Report planned changes without applying them")
@@ -107,7 +109,11 @@ def main(argv: list[str] | None = None) -> None:
     if not all_specs:
         return
 
-    credentials = get_credentials()
+    try:
+        credentials = get_credentials()
+    except AuthError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
     client = data_agent_client(credentials, args.location)
 
     results: list[Result] = []

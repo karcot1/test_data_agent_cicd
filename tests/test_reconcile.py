@@ -104,8 +104,9 @@ def test_soft_deleted_detected():
 
 
 def test_update_mask_only_includes_set_fields():
-    assert list(rc.update_mask_for(make_agent()).paths) == ["display_name", "description", "data_analytics_agent"]
-    assert list(rc.update_mask_for(make_agent(display_name="", description="")).paths) == ["data_analytics_agent"]
+    published = "data_analytics_agent.published_context"
+    assert list(rc.update_mask_for(make_agent()).paths) == ["display_name", "description", published]
+    assert list(rc.update_mask_for(make_agent(display_name="", description="")).paths) == [published]
 
 
 # ---------------------------------------------------------------- reconcile

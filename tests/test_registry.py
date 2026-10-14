@@ -84,6 +84,23 @@ def test_registry_locations_deduplicated():
     assert reg.registry_locations == ("global", "us-central1")
 
 
+def test_services_follows_pagination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("pageToken") == "page2":
+            return httpx.Response(200, json={"services": [svc("projects/p/locations/global/services/my-agent")]})
+        return httpx.Response(200, json={"services": [svc("projects/p/locations/global/services/other")], "nextPageToken": "page2"})
+
+    reg = registry.AgentRegistry(httpx.Client(transport=httpx.MockTransport(handler)), "p")
+    assert len(reg.services("global")) == 2
+    assert reg.missing_locations("my_agent") == []
+
+
+def test_services_raises_on_api_error():
+    reg = registry.AgentRegistry(httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(403))), "p")
+    with pytest.raises(httpx.HTTPStatusError):
+        reg.missing_locations("my_agent")
+
+
 def test_sync_fetches_card_from_regional_endpoint_and_normalizes_it():
     requests = []
 

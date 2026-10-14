@@ -111,7 +111,8 @@ def update_mask_for(desired: geminidataanalytics.DataAgent) -> field_mask_pb2.Fi
         paths.append("display_name")
     if desired.description:
         paths.append("description")
-    paths.append("data_analytics_agent")
+    # Only the published context: a draft (staging_context) edited in BigQuery Studio is kept.
+    paths.append("data_analytics_agent.published_context")
     return field_mask_pb2.FieldMask(paths=paths)
 
 

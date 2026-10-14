@@ -130,10 +130,28 @@ def test_source_project_equal_to_target_is_noop():
     assert tables(spec) == [(P, "d", "t")]
 
 
-@pytest.mark.parametrize("agent_id", ["", "My Agent", "1agent", "agent.v2", "a" * 64, 42, None])
+@pytest.mark.parametrize("agent_id", ["", "My Agent", "1agent", "agent.v2", "a" * 64, "abc\n", 42, None])
 def test_invalid_agent_id_rejected(agent_id):
     with pytest.raises(specs.SpecError):
         specs.parse_agent_config(config(agent_id=agent_id), "bad.json", P, L)
+
+
+def test_null_optional_strings_become_empty():
+    spec = specs.parse_agent_config(
+        config(
+            description=None,
+            example_queries=[{
+                "natural_language_question": "q", "sql_query": "s",
+                "parameters": [{"name": "n", "description": None}],
+            }],
+            glossary_terms=[{"display_name": "t", "description": None}],
+        ),
+        "nulls.json", P, L,
+    )
+    ctx = spec.data_agent.data_analytics_agent.published_context
+    assert spec.data_agent.description == ""
+    assert ctx.example_queries[0].parameters[0].description == ""
+    assert ctx.glossary_terms[0].description == ""
 
 
 @pytest.mark.parametrize("overrides, match", [
@@ -144,10 +162,14 @@ def test_invalid_agent_id_rejected(agent_id):
     ({"table_references": "p.d.t"}, "must be a list"),
     ({"example_queries": [{"natural_language_question": "q"}]}, "sql_query"),
     ({"example_queries": [{"natural_language_question": "q", "sql_query": "s", "parameters": [{"nme": "x"}]}]}, "unknown keys"),
+    ({"example_queries": [{"natural_language_question": "q", "sql_query": "s", "parameters": [{"name": "x", "data_type": 5}]}]}, "data_type must be a string"),
     ({"glossary_terms": [{"description": "no name"}]}, "display_name"),
+    ({"glossary_terms": [{"display_name": "t", "description": ["x"]}]}, "description must be a string"),
     ({"glossary_terms": [{"display_name": "t", "labels": [1]}]}, "list of strings"),
     ({"options": {"python": True}}, "unknown keys"),
     ({"options": {"python_enabled": "yes"}}, "true or false"),
+    ({"options": []}, "must be an object"),
+    ({"options": False}, "must be an object"),
     ({"description": 3}, "must be a string"),
 ])
 def test_invalid_config_rejected(overrides, match):

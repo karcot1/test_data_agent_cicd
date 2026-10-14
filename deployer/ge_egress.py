@@ -34,7 +34,7 @@ import sys
 import httpx
 
 from deployer import iam, specs
-from deployer.auth import auth_headers, get_credentials
+from deployer.auth import AuthError, auth_headers, get_credentials
 from deployer.cli import load_all
 
 
@@ -44,7 +44,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Grant Gemini Enterprise agents the IAP egress roles needed to call their Data Agents.",
     )
     parser.add_argument("--project_id", required=True, help="Target GCP project ID")
-    parser.add_argument("--location", default="global", help="Data Agent location (default: global)")
+    parser.add_argument(
+        "--location", default="global", type=str.lower, help="Data Agent location (default: global)"
+    )
     parser.add_argument("--config_dir", default="agent_configs", help="Folder of no-code agent JSON configs")
     parser.add_argument("--low_code_dir", default="low_code_agents", help="Folder of low-code agent modules")
     parser.add_argument(
@@ -76,7 +78,11 @@ def main(argv: list[str] | None = None) -> None:
     print(f"== Gemini Enterprise egress IAM ({mode}) project={args.project_id}")
     print(f"== Data Agent IDs: {sorted(agent_ids)}\n")
 
-    credentials = get_credentials()
+    try:
+        credentials = get_credentials()
+    except AuthError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
     with httpx.Client(headers=auth_headers(credentials, args.project_id), timeout=60.0) as http:
         try:
             iam.configure_egress(http, args.project_id, agent_ids, dry_run=args.dry_run)

@@ -66,12 +66,20 @@ class AgentRegistry:
         self._services: dict[str, list[dict]] = {}
 
     def services(self, reg_location: str) -> list[dict]:
+        """List every service in `reg_location` (all pages); API errors are raised, not hidden."""
         if reg_location not in self._services:
             url = f"{REGISTRY_API}/projects/{self.project_id}/locations/{reg_location}/services"
-            resp = self.client.get(url)
-            self._services[reg_location] = (
-                resp.json().get("services", []) if resp.status_code == 200 else []
-            )
+            services: list[dict] = []
+            params: dict[str, str] = {}
+            while True:
+                resp = self.client.get(url, params=params)
+                resp.raise_for_status()
+                body = resp.json()
+                services += body.get("services", [])
+                if not body.get("nextPageToken"):
+                    break
+                params = {"pageToken": body["nextPageToken"]}
+            self._services[reg_location] = services
         return self._services[reg_location]
 
     def missing_locations(self, agent_id: str) -> list[str]:

@@ -95,6 +95,13 @@ Unknown keys are rejected, so typos fail the build instead of being silently ign
 > [!NOTE]
 > The deployer assumes dataset and table names are the same in every environment. The Conversational Analytics API checks that every referenced table exists in the target project, even if it's empty.
 
+Limitations:
+- `source_project_id` rewriting only matches the `project.dataset.table` form. References written as `` `project`.dataset.table `` or `project:dataset.table` are left unchanged.
+- The schema doesn't cover table and column descriptions or schema relationships. `deployer.export_agent` doesn't export them, and the deployer doesn't set them.
+
+> [!IMPORTANT]
+> Treat Git as the single source of truth in pipeline-managed environments (STG, PRD). A deployment replaces the agent's **published** context with the one in the repository, so changes published directly in BigQuery Studio there are overwritten. Drafts (unpublished edits) are left untouched. Make changes in DEV, export them, and promote them through a pull request.
+
 ### Adding an agent
 - **No-code:** publish the agent in BigQuery Studio, then export it:
   ```bash

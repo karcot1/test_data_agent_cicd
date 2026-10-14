@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 
@@ -38,7 +39,7 @@ from google.api_core import exceptions
 from google.cloud import geminidataanalytics
 
 from deployer import specs
-from deployer.auth import get_credentials
+from deployer.auth import AuthError, get_credentials
 from deployer.endpoints import data_agent_client
 
 RESOURCE_RE = re.compile(r"projects/([^/]+)/locations/([^/]+)/dataAgents/([^/?#]+)")
@@ -63,7 +64,7 @@ def default_agent_id(display_name: str, fallback: str) -> str:
     if slug and not slug[0].isalpha():
         slug = f"agent_{slug}"
     slug = slug[:63].rstrip("_-")
-    return slug if specs.AGENT_ID_RE.match(slug) else fallback
+    return slug if specs.AGENT_ID_RE.fullmatch(slug) else fallback
 
 
 def agent_to_config(
@@ -72,7 +73,9 @@ def agent_to_config(
     """Convert a live DataAgent into the agent_configs/ JSON schema.
 
     Only the published context is exported, and server-populated fields (table
-    schemas, timestamps, the staging context) are dropped.
+    schemas, timestamps, the staging context) are dropped. Settings the schema
+    doesn't cover, such as table and column descriptions or schema relationships,
+    are not exported.
     """
     ctx = agent.data_analytics_agent.published_context
     if not ctx.datasource_references.bq.table_references:
@@ -128,12 +131,16 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as e:
         print(e, file=sys.stderr)
         sys.exit(2)
+    location = location.lower()
 
-    client = data_agent_client(get_credentials(), location)
     try:
+        client = data_agent_client(get_credentials(), location)
         agent = client.get_data_agent(
             name=specs.agent_resource_name(project, location, source_agent_id)
         )
+    except AuthError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
     except exceptions.GoogleAPICallError as e:
         print(f"Fetching Data Agent failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -147,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Exported agent is not deployable: {e}", file=sys.stderr)
         sys.exit(1)
 
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
         f.write("\n")

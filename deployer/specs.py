@@ -90,7 +90,7 @@ def agent_resource_name(project_id: str, location: str, agent_id: str) -> str:
 
 
 def validate_agent_id(agent_id, source: str) -> str:
-    if not isinstance(agent_id, str) or not AGENT_ID_RE.match(agent_id):
+    if not isinstance(agent_id, str) or not AGENT_ID_RE.fullmatch(agent_id):
         raise SpecError(
             f"'{source}': agent_id {agent_id!r} must start with a lowercase letter and contain "
             "only lowercase letters, digits, '_' or '-' (max 63 characters)."
@@ -122,8 +122,23 @@ def _check_list(value, where: str) -> list:
     return value
 
 
+def _optional_str(obj: dict, key: str, where: str) -> str:
+    """Return obj[key] as a string; a missing or null value becomes ""."""
+    value = obj.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise SpecError(f"{where}.{key} must be a string, got {type(value).__name__}.")
+    return value
+
+
 def _project_rewriter(source_project_id: str | None, target_project_id: str):
-    """Return a function that rewrites `<source_project_id>.` references to the target project."""
+    """Return a function that rewrites `<source_project_id>.` references to the target project.
+
+    Only the `project.dataset.table` form is rewritten; references that quote the
+    project on its own (`project`.dataset.table) or use the legacy project:dataset
+    form are left unchanged.
+    """
     if not source_project_id or source_project_id == target_project_id:
         return lambda text: text
     # Don't match the source ID inside a longer project ID (e.g. "my-dev" in "team-my-dev").
@@ -162,12 +177,17 @@ def parse_agent_config(data, source: str, project_id: str, location: str) -> Age
     for i, query in enumerate(_check_list(data.get("example_queries"), f"'{source}': example_queries")):
         where = f"'{source}': example_queries[{i}]"
         _check_object(query, EXAMPLE_QUERY_KEYS, {"natural_language_question", "sql_query"}, where)
-        parameters = [
-            geminidataanalytics.QueryParameter(
-                **_check_object(param, PARAMETER_KEYS, {"name"}, f"{where}.parameters[{j}]")
+        parameters = []
+        for j, param in enumerate(_check_list(query.get("parameters"), f"{where}.parameters")):
+            param_where = f"{where}.parameters[{j}]"
+            _check_object(param, PARAMETER_KEYS, {"name"}, param_where)
+            parameters.append(
+                geminidataanalytics.QueryParameter(
+                    name=param["name"],
+                    description=_optional_str(param, "description", param_where),
+                    data_type=_optional_str(param, "data_type", param_where),
+                )
             )
-            for j, param in enumerate(_check_list(query.get("parameters"), f"{where}.parameters"))
-        ]
         example_queries.append(
             geminidataanalytics.ExampleQuery(
                 natural_language_question=query["natural_language_question"],
@@ -186,22 +206,24 @@ def parse_agent_config(data, source: str, project_id: str, location: str) -> Age
         glossary_terms.append(
             geminidataanalytics.GlossaryTerm(
                 display_name=term["display_name"],
-                description=term.get("description", ""),
+                description=_optional_str(term, "description", where),
                 labels=labels,
             )
         )
 
-    options = _check_object(data.get("options") or {}, OPTION_KEYS, set(), f"'{source}': options")
-    python_enabled = options.get("python_enabled", False)
+    options = data.get("options")
+    _check_object({} if options is None else options, OPTION_KEYS, set(), f"'{source}': options")
+    python_enabled = (options or {}).get("python_enabled", False)
     if not isinstance(python_enabled, bool):
         raise SpecError(f"'{source}': options.python_enabled must be true or false.")
 
-    for key in ("display_name", "description", "system_instruction"):
-        if not isinstance(data.get(key, ""), str):
-            raise SpecError(f"'{source}': {key} must be a string.")
+    where = f"'{source}'"
+    display_name = _optional_str(data, "display_name", where)
+    description = _optional_str(data, "description", where)
+    system_instruction = _optional_str(data, "system_instruction", where)
 
     published_context = geminidataanalytics.Context(
-        system_instruction=rewrite(data.get("system_instruction", "")),
+        system_instruction=rewrite(system_instruction),
         datasource_references=geminidataanalytics.DatasourceReferences(
             bq=geminidataanalytics.BigQueryTableReferences(table_references=table_references)
         ),
@@ -215,8 +237,8 @@ def parse_agent_config(data, source: str, project_id: str, location: str) -> Age
     )
     data_agent = geminidataanalytics.DataAgent(
         name=agent_resource_name(project_id, location, agent_id),
-        display_name=data.get("display_name", ""),
-        description=data.get("description", ""),
+        display_name=display_name,
+        description=description,
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=published_context
         ),

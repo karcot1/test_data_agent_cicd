@@ -14,7 +14,10 @@ venv/
 
 # Local secrets and environment
 .env
-*.env.local
+.env.*
+!.env.example
+*-key.json
+*credentials*.json
 
 # Editors and OS
 .vscode/
