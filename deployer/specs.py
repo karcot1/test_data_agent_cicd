@@ -21,6 +21,7 @@ No-code agents are declarative JSON files in agent_configs/ (see agent_configs/_
       "location": "global",                           # optional, defaults to CLI --location ("global")
       "display_name": "Sales agent",
       "description": "Answers questions about sales.",
+      "labels": {"env": "prod"},
       "source_project_id": "my-dev-project",          # optional, see below
       "system_instruction": "...",
       "table_references": [                           # required, at least one
@@ -31,7 +32,7 @@ No-code agents are declarative JSON files in agent_configs/ (see agent_configs/_
          "parameters": [{"name": "...", "description": "...", "data_type": "..."}]}
       ],
       "glossary_terms": [{"display_name": "...", "description": "...", "labels": ["..."]}],
-      "options": {"python_enabled": false}
+      "options": {"python_enabled": false, "model": "MODEL_UNSPECIFIED"}
     }
 
 When source_project_id is set and differs from the target project, every reference to
@@ -60,6 +61,7 @@ CONFIG_KEYS = {
     "location",
     "display_name",
     "description",
+    "labels",
     "source_project_id",
     "system_instruction",
     "table_references",
@@ -71,7 +73,8 @@ TABLE_KEYS = {"project_id", "dataset_id", "table_id"}
 EXAMPLE_QUERY_KEYS = {"natural_language_question", "sql_query", "parameters"}
 PARAMETER_KEYS = {"name", "description", "data_type"}
 GLOSSARY_TERM_KEYS = {"display_name", "description", "labels"}
-OPTION_KEYS = {"python_enabled"}
+OPTION_KEYS = {"python_enabled", "model"}
+VALID_MODELS = {"MODEL_UNSPECIFIED", "LATEST_GA_MODEL"}
 
 
 class SpecError(ValueError):
@@ -227,6 +230,21 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
     python_enabled = (options or {}).get("python_enabled", False)
     if not isinstance(python_enabled, bool):
         raise SpecError(f"'{source}': options.python_enabled must be true or false.")
+    model_name = (options or {}).get("model") or "MODEL_UNSPECIFIED"
+    if not isinstance(model_name, str) or model_name not in VALID_MODELS:
+        raise SpecError(
+            f"'{source}': options.model must be one of {sorted(VALID_MODELS)}, got {model_name!r}."
+        )
+
+    raw_labels = data.get("labels")
+    if raw_labels is None:
+        agent_labels: dict[str, str] = {}
+    elif isinstance(raw_labels, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in raw_labels.items()
+    ):
+        agent_labels = dict(raw_labels)
+    else:
+        raise SpecError(f"'{source}': labels must be an object mapping strings to strings.")
 
     where = f"'{source}'"
     display_name = _optional_str(data, "display_name", where)
@@ -243,15 +261,18 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
         options=geminidataanalytics.ConversationOptions(
             analysis=geminidataanalytics.AnalysisOptions(
                 python=geminidataanalytics.AnalysisOptions.Python(enabled=python_enabled)
-            )
+            ),
+            model=geminidataanalytics.ConversationOptions.Model[model_name],
         ),
     )
     data_agent = geminidataanalytics.DataAgent(
         name=agent_resource_name(project_id, agent_location, agent_id),
         display_name=display_name,
         description=description,
+        labels=agent_labels,
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
-            published_context=published_context
+            published_context=published_context,
+            staging_context=published_context,
         ),
     )
     return AgentSpec(

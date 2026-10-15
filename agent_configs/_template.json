@@ -3,6 +3,7 @@
   "location": "global",
   "display_name": "<AGENT_DISPLAY_NAME>",
   "description": "<AGENT_DESCRIPTION>",
+  "labels": {},
   "source_project_id": "<SOURCE_PROJECT_ID>",
   "system_instruction": "<SYSTEM_INSTRUCTIONS>",
   "table_references": [
@@ -27,6 +28,7 @@
     }
   ],
   "options": {
-    "python_enabled": false
+    "python_enabled": false,
+    "model": "MODEL_UNSPECIFIED"
   }
 }

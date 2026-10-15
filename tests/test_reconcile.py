@@ -32,11 +32,14 @@ def make_agent(
     name=NAME,
     glossary=(("GMV", "Gross merchandise value"),),
     python_enabled=False,
+    labels=None,
+    model="MODEL_UNSPECIFIED",
 ):
     return geminidataanalytics.DataAgent(
         name=name,
         display_name=display_name,
         description=description,
+        labels=labels or {},
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=geminidataanalytics.Context(
                 system_instruction=instruction,
@@ -58,7 +61,8 @@ def make_agent(
                 options=geminidataanalytics.ConversationOptions(
                     analysis=geminidataanalytics.AnalysisOptions(
                         python=geminidataanalytics.AnalysisOptions.Python(enabled=python_enabled)
-                    )
+                    ),
+                    model=geminidataanalytics.ConversationOptions.Model[model],
                 ),
             )
         ),
@@ -84,9 +88,11 @@ def test_whitespace_in_instruction_ignored():
     ({"examples": ()}, "example_queries"),
     ({"display_name": "b"}, "display_name"),
     ({"description": "new"}, "description"),
+    ({"labels": {"env": "prod"}}, "labels"),
     ({"glossary": (("GMV", "changed"),)}, "glossary_terms"),
     ({"glossary": ()}, "glossary_terms"),
     ({"python_enabled": True}, "python_enabled"),
+    ({"model": "LATEST_GA_MODEL"}, "model"),
 ])
 def test_each_field_detected(kwargs, field):
     assert rc.diff_data_agent(make_agent(), make_agent(**kwargs)) == [field]

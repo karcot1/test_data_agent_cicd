@@ -25,6 +25,7 @@ def live_agent(tables=(("dev", "d", "t"),)):
         name="projects/dev/locations/us/dataAgents/agent_123",
         display_name="Sales Agent",
         description="Sales questions",
+        labels={"env": "dev"},
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             staging_context=geminidataanalytics.Context(system_instruction="draft"),
             published_context=geminidataanalytics.Context(
@@ -50,6 +51,9 @@ def live_agent(tables=(("dev", "d", "t"),)):
                     )
                 ],
                 glossary_terms=[geminidataanalytics.GlossaryTerm(display_name="GMV", labels=["finance"])],
+                options=geminidataanalytics.ConversationOptions(
+                    model=geminidataanalytics.ConversationOptions.Model.LATEST_GA_MODEL
+                ),
             ),
         ),
     )
@@ -63,6 +67,7 @@ def test_agent_to_config_exports_published_context_only():
         "location": "us",
         "display_name": "Sales Agent",
         "description": "Sales questions",
+        "labels": {"env": "dev"},
         "source_project_id": "dev",
         "system_instruction": "Be precise.",
         "table_references": [{"project_id": "dev", "dataset_id": "d", "table_id": "t"}],
@@ -72,7 +77,7 @@ def test_agent_to_config_exports_published_context_only():
             "parameters": [{"name": "n", "description": "", "data_type": "INT64"}],
         }],
         "glossary_terms": [{"display_name": "GMV", "description": "", "labels": ["finance"]}],
-        "options": {"python_enabled": False},
+        "options": {"python_enabled": False, "model": "LATEST_GA_MODEL"},
     }
 
 
@@ -84,9 +89,11 @@ def test_exported_config_round_trips_through_deployer():
 
     assert spec.location == "us"
     assert spec.data_agent.name == "projects/prd/locations/us/dataAgents/sales_agent"
+    assert dict(spec.data_agent.labels) == {"env": "dev"}
     assert ctx.datasource_references.bq.table_references[0].project_id == "prd"
     assert ctx.example_queries[0].sql_query == "SELECT SUM(x) FROM `prd.d.t`"
     assert ctx.glossary_terms[0].display_name == "GMV"
+    assert ctx.options.model == geminidataanalytics.ConversationOptions.Model.LATEST_GA_MODEL
 
 
 def test_unpublished_agent_rejected():

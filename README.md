@@ -84,12 +84,14 @@ Each file in `agent_configs/` describes one Data Agent with the fields the Conve
 | `agent_id` | Yes | Data Agent ID. Starts with a lowercase letter; lowercase letters, digits, `_` or `-`; max 63 characters. |
 | `location` | No | Data Agent location (`global`, `us`, `eu`, etc.). Preserved by `export_agent`; defaults to the CLI `--location` (`global`) when omitted. |
 | `display_name`, `description` | No | `DataAgent.display_name`, `DataAgent.description` |
+| `labels` | No | `DataAgent.labels` (`{key: value}` map of strings) |
 | `source_project_id` | No | Project the agent was exported from. References to it are rewritten to the target project; other projects (e.g. `bigquery-public-data`) are left as-is. |
 | `system_instruction` | No | `Context.system_instruction` |
 | `table_references` | Yes (≥ 1) | `Context.datasource_references.bq.table_references` (`project_id`, `dataset_id`, `table_id`) |
 | `example_queries` | No | `Context.example_queries` (`natural_language_question`, `sql_query`, optional `parameters` with `name`, `description`, `data_type`) |
 | `glossary_terms` | No | `Context.glossary_terms` (`display_name`, `description`, `labels`) |
 | `options.python_enabled` | No | `Context.options.analysis.python.enabled` (default `false`) |
+| `options.model` | No | `Context.options.model` (`"MODEL_UNSPECIFIED"` or `"LATEST_GA_MODEL"`; default `"MODEL_UNSPECIFIED"`) |
 
 Unknown keys are rejected, so typos fail the build instead of being silently ignored.
 
@@ -101,7 +103,7 @@ Limitations:
 - The schema doesn't cover table and column descriptions or schema relationships. `deployer.export_agent` doesn't export them, and the deployer doesn't set them.
 
 > [!IMPORTANT]
-> Treat Git as the single source of truth in pipeline-managed environments (STG, PRD). A deployment replaces the agent's **published** context with the one in the repository, so changes published directly in BigQuery Studio there are overwritten. Drafts (unpublished edits) are left untouched. Make changes in DEV, export them, and promote them through a pull request.
+> Treat Git as the single source of truth in pipeline-managed environments (STG, PRD). A deployment updates both `published_context` (used at runtime) and `staging_context` (rendered by the BigQuery Studio UI) to match the repository, so edits made directly in BigQuery Studio in target environments are overwritten. Make changes in DEV, publish and export them, and promote them through a pull request.
 
 ### Adding an agent
 - **No-code:** publish the agent in BigQuery Studio, then export it:

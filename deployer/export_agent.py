@@ -99,6 +99,7 @@ def agent_to_config(
         "location": location,
         "display_name": agent.display_name,
         "description": agent.description,
+        "labels": dict(sorted(agent.labels.items())),
         "source_project_id": source_project_id,
         "system_instruction": ctx.system_instruction,
         "table_references": [
@@ -120,7 +121,10 @@ def agent_to_config(
             {"display_name": g.display_name, "description": g.description, "labels": list(g.labels)}
             for g in ctx.glossary_terms
         ],
-        "options": {"python_enabled": ctx.options.analysis.python.enabled},
+        "options": {
+            "python_enabled": ctx.options.analysis.python.enabled,
+            "model": ctx.options.model.name,
+        },
     }
 
 

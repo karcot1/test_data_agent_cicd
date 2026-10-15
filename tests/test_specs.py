@@ -174,8 +174,11 @@ def test_null_optional_strings_become_empty():
     ({"glossary_terms": [{"display_name": "t", "labels": [1]}]}, "list of strings"),
     ({"options": {"python": True}}, "unknown keys"),
     ({"options": {"python_enabled": "yes"}}, "true or false"),
+    ({"options": {"model": "GPT_4"}}, "options.model must be one of"),
     ({"options": []}, "must be an object"),
     ({"options": False}, "must be an object"),
+    ({"labels": ["not-a-dict"]}, "labels must be an object"),
+    ({"labels": {"k": 1}}, "labels must be an object"),
     ({"description": 3}, "must be a string"),
 ])
 def test_invalid_config_rejected(overrides, match):

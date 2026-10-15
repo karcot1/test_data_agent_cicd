@@ -84,6 +84,9 @@ def diff_data_agent(
     if desired.description and existing.description != desired.description:
         changed.append("description")
 
+    if dict(existing.labels) != dict(desired.labels):
+        changed.append("labels")
+
     existing_ctx = existing.data_analytics_agent.published_context
     desired_ctx = desired.data_analytics_agent.published_context
 
@@ -102,24 +105,51 @@ def diff_data_agent(
     if existing_ctx.options.analysis.python.enabled != desired_ctx.options.analysis.python.enabled:
         changed.append("python_enabled")
 
+    if existing_ctx.options.model != desired_ctx.options.model:
+        changed.append("model")
+
+    # Keep staging_context (what the BigQuery Studio UI displays) in sync with the deployed spec.
+    desired_staging = desired.data_analytics_agent.staging_context
+    if desired_staging != geminidataanalytics.Context():
+        existing_staging = existing.data_analytics_agent.staging_context
+        if (
+            existing_staging.system_instruction.strip() != desired_staging.system_instruction.strip()
+            or _tables(existing_staging) != _tables(desired_staging)
+            or _examples(existing_staging) != _examples(desired_staging)
+            or _glossary(existing_staging) != _glossary(desired_staging)
+            or existing_staging.options.analysis.python.enabled != desired_staging.options.analysis.python.enabled
+            or existing_staging.options.model != desired_staging.options.model
+        ):
+            changed.append("staging_context")
+
     return changed
 
 
-def update_mask_for(desired: geminidataanalytics.DataAgent) -> field_mask_pb2.FieldMask:
+def update_mask_for(
+    desired: geminidataanalytics.DataAgent,
+    existing: geminidataanalytics.DataAgent | None = None,
+) -> field_mask_pb2.FieldMask:
     paths = []
     if desired.display_name:
         paths.append("display_name")
     if desired.description:
         paths.append("description")
-    # Only the published context: a draft (staging_context) edited in BigQuery Studio is kept.
+    if desired.labels or (existing is not None and existing.labels):
+        paths.append("labels")
     paths.append("data_analytics_agent.published_context")
+    if desired.data_analytics_agent.staging_context != geminidataanalytics.Context():
+        paths.append("data_analytics_agent.staging_context")
     return field_mask_pb2.FieldMask(paths=paths)
 
 
-def _update(client, desired: geminidataanalytics.DataAgent) -> None:
+def _update(
+    client,
+    desired: geminidataanalytics.DataAgent,
+    existing: geminidataanalytics.DataAgent | None = None,
+) -> None:
     operation = client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(
-            data_agent=desired, update_mask=update_mask_for(desired)
+            data_agent=desired, update_mask=update_mask_for(desired, existing)
         )
     )
     operation.result()
@@ -155,5 +185,5 @@ def reconcile(client, spec: AgentSpec, dry_run: bool = False) -> Result:
         return Result(spec.agent_id, spec.source, SKIP)
 
     if not dry_run:
-        _update(client, desired)
+        _update(client, desired, existing)
     return Result(spec.agent_id, spec.source, MODIFY, changed_fields=changed)
