@@ -6,7 +6,6 @@ google-auth==2.58.0
 httpx==0.28.1
 pytest==8.*
 
-# Transitive constraints: keep compatible with the ADK / A2A packages that share
-# the local .venv (a2a-sdk requires protobuf<7; opentelemetry-sdk 1.42.1 pins its api).
+# Used directly (google.protobuf.field_mask_pb2). Kept below 7 to stay compatible
+# with a2a-sdk, which examples/ uses.
 protobuf<7
-opentelemetry-api==1.42.1

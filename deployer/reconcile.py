@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Compare desired agent specs with live Data Agents and create/update only what changed."""
 
 from __future__ import annotations
@@ -43,6 +57,26 @@ def _examples(ctx) -> list[tuple]:
     ]
 
 
+def _glossary(ctx) -> list[tuple]:
+    return [
+        (g.display_name.strip(), g.description.strip(), list(g.labels))
+        for g in ctx.glossary_terms
+    ]
+
+
+def _context_diff(existing_ctx, desired_ctx) -> list[str]:
+    """Names of the Context fields managed by this repo that differ."""
+    checks = {
+        "system_instruction": lambda c: c.system_instruction.strip(),
+        "table_references": _tables,
+        "example_queries": _examples,
+        "glossary_terms": _glossary,
+        "python_enabled": lambda c: c.options.analysis.python.enabled,
+        "model": lambda c: c.options.model,
+    }
+    return [name for name, get in checks.items() if get(existing_ctx) != get(desired_ctx)]
+
+
 def diff_data_agent(
     existing: geminidataanalytics.DataAgent,
     desired: geminidataanalytics.DataAgent,
@@ -63,35 +97,47 @@ def diff_data_agent(
     if desired.description and existing.description != desired.description:
         changed.append("description")
 
-    existing_ctx = existing.data_analytics_agent.published_context
-    desired_ctx = desired.data_analytics_agent.published_context
+    if dict(existing.labels) != dict(desired.labels):
+        changed.append("labels")
 
-    if existing_ctx.system_instruction.strip() != desired_ctx.system_instruction.strip():
-        changed.append("system_instruction")
+    existing_agent = existing.data_analytics_agent
+    desired_agent = desired.data_analytics_agent
+    changed += _context_diff(existing_agent.published_context, desired_agent.published_context)
 
-    if _tables(existing_ctx) != _tables(desired_ctx):
-        changed.append("table_references")
-
-    if _examples(existing_ctx) != _examples(desired_ctx):
-        changed.append("example_queries")
+    # Keep staging_context (what the BigQuery Studio UI displays) in sync with the deployed spec.
+    if desired_agent.staging_context != geminidataanalytics.Context() and _context_diff(
+        existing_agent.staging_context, desired_agent.staging_context
+    ):
+        changed.append("staging_context")
 
     return changed
 
 
-def update_mask_for(desired: geminidataanalytics.DataAgent) -> field_mask_pb2.FieldMask:
+def update_mask_for(
+    desired: geminidataanalytics.DataAgent,
+    existing: geminidataanalytics.DataAgent | None = None,
+) -> field_mask_pb2.FieldMask:
     paths = []
     if desired.display_name:
         paths.append("display_name")
     if desired.description:
         paths.append("description")
-    paths.append("data_analytics_agent")
+    if desired.labels or (existing is not None and existing.labels):
+        paths.append("labels")
+    paths.append("data_analytics_agent.published_context")
+    if desired.data_analytics_agent.staging_context != geminidataanalytics.Context():
+        paths.append("data_analytics_agent.staging_context")
     return field_mask_pb2.FieldMask(paths=paths)
 
 
-def _update(client, desired: geminidataanalytics.DataAgent) -> None:
+def _update(
+    client,
+    desired: geminidataanalytics.DataAgent,
+    existing: geminidataanalytics.DataAgent | None = None,
+) -> None:
     operation = client.update_data_agent(
         request=geminidataanalytics.UpdateDataAgentRequest(
-            data_agent=desired, update_mask=update_mask_for(desired)
+            data_agent=desired, update_mask=update_mask_for(desired, existing)
         )
     )
     operation.result()
@@ -127,5 +173,5 @@ def reconcile(client, spec: AgentSpec, dry_run: bool = False) -> Result:
         return Result(spec.agent_id, spec.source, SKIP)
 
     if not dry_run:
-        _update(client, desired)
+        _update(client, desired, existing)
     return Result(spec.agent_id, spec.source, MODIFY, changed_fields=changed)

@@ -1,0 +1,43 @@
+{
+  "agent_id": "thelook_ecommerce_agent",
+  "location": "global",
+  "display_name": "theLook eCommerce analyst",
+  "description": "Answers questions about orders, revenue and products in the public theLook eCommerce dataset.",
+  "labels": {},
+  "system_instruction": "You are a data analyst for theLook, a fictional online clothing store.\n- Revenue is the sum of order_items.sale_price for items whose status is not 'Cancelled' or 'Returned'.\n- Use order_items.created_at for date filters unless the user asks about shipping or delivery.\n- Join order_items to products on order_items.product_id = products.id.",
+  "table_references": [
+    {
+      "project_id": "bigquery-public-data",
+      "dataset_id": "thelook_ecommerce",
+      "table_id": "orders"
+    },
+    {
+      "project_id": "bigquery-public-data",
+      "dataset_id": "thelook_ecommerce",
+      "table_id": "order_items"
+    },
+    {
+      "project_id": "bigquery-public-data",
+      "dataset_id": "thelook_ecommerce",
+      "table_id": "products"
+    }
+  ],
+  "example_queries": [
+    {
+      "natural_language_question": "What were the top 5 product categories by revenue last month?",
+      "sql_query": "SELECT p.category, ROUND(SUM(oi.sale_price), 2) AS revenue\nFROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi\nJOIN `bigquery-public-data.thelook_ecommerce.products` AS p ON oi.product_id = p.id\nWHERE oi.status NOT IN ('Cancelled', 'Returned')\n  AND oi.created_at >= TIMESTAMP(DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH))\n  AND oi.created_at < TIMESTAMP(DATE_TRUNC(CURRENT_DATE(), MONTH))\nGROUP BY p.category\nORDER BY revenue DESC\nLIMIT 5",
+      "parameters": []
+    }
+  ],
+  "glossary_terms": [
+    {
+      "display_name": "Revenue",
+      "description": "Sum of order_items.sale_price, excluding cancelled and returned items.",
+      "labels": ["finance"]
+    }
+  ],
+  "options": {
+    "python_enabled": false,
+    "model": "MODEL_UNSPECIFIED"
+  }
+}

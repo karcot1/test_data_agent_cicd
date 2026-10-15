@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import pytest
 from google.api_core import exceptions
 from google.cloud import geminidataanalytics
@@ -16,11 +30,16 @@ def make_agent(
     display_name="a",
     description="desc",
     name=NAME,
+    glossary=(("GMV", "Gross merchandise value"),),
+    python_enabled=False,
+    labels=None,
+    model="MODEL_UNSPECIFIED",
 ):
     return geminidataanalytics.DataAgent(
         name=name,
         display_name=display_name,
         description=description,
+        labels=labels or {},
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=geminidataanalytics.Context(
                 system_instruction=instruction,
@@ -36,6 +55,15 @@ def make_agent(
                     geminidataanalytics.ExampleQuery(natural_language_question=q, sql_query=s)
                     for q, s in examples
                 ],
+                glossary_terms=[
+                    geminidataanalytics.GlossaryTerm(display_name=n, description=d) for n, d in glossary
+                ],
+                options=geminidataanalytics.ConversationOptions(
+                    analysis=geminidataanalytics.AnalysisOptions(
+                        python=geminidataanalytics.AnalysisOptions.Python(enabled=python_enabled)
+                    ),
+                    model=geminidataanalytics.ConversationOptions.Model[model],
+                ),
             )
         ),
     )
@@ -60,6 +88,11 @@ def test_whitespace_in_instruction_ignored():
     ({"examples": ()}, "example_queries"),
     ({"display_name": "b"}, "display_name"),
     ({"description": "new"}, "description"),
+    ({"labels": {"env": "prod"}}, "labels"),
+    ({"glossary": (("GMV", "changed"),)}, "glossary_terms"),
+    ({"glossary": ()}, "glossary_terms"),
+    ({"python_enabled": True}, "python_enabled"),
+    ({"model": "LATEST_GA_MODEL"}, "model"),
 ])
 def test_each_field_detected(kwargs, field):
     assert rc.diff_data_agent(make_agent(), make_agent(**kwargs)) == [field]
@@ -77,8 +110,9 @@ def test_soft_deleted_detected():
 
 
 def test_update_mask_only_includes_set_fields():
-    assert list(rc.update_mask_for(make_agent()).paths) == ["display_name", "description", "data_analytics_agent"]
-    assert list(rc.update_mask_for(make_agent(display_name="", description="")).paths) == ["data_analytics_agent"]
+    published = "data_analytics_agent.published_context"
+    assert list(rc.update_mask_for(make_agent()).paths) == ["display_name", "description", published]
+    assert list(rc.update_mask_for(make_agent(display_name="", description="")).paths) == [published]
 
 
 # ---------------------------------------------------------------- reconcile

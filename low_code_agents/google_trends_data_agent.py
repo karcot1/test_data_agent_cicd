@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Low-code Data Agent definition: Google Trends analyst.
 
 Deployed by `python -m deployer`. This module only describes the desired agent;
@@ -6,7 +20,7 @@ it must define AGENT_ID and build_agent(project_id, location).
 
 from google.cloud import geminidataanalytics
 
-AGENT_ID = "test_low_code_agent"
+AGENT_ID = "google_trends_agent"
 
 SYSTEM_INSTRUCTION = """
 system_instruction:
@@ -69,8 +83,14 @@ TABLES = [
 
 
 def build_agent(project_id: str, location: str) -> geminidataanalytics.DataAgent:
-    """Return the desired DataAgent. The deployer fills in `name` from AGENT_ID."""
+    """Return the desired DataAgent.
+
+    The deployer fills in `name` from AGENT_ID and copies published_context to
+    staging_context, so BigQuery Studio shows what was deployed.
+    """
     return geminidataanalytics.DataAgent(
+        display_name="Google Trends analyst",
+        description="Answers questions about top and rising Google Search terms by US metro area.",
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=geminidataanalytics.Context(
                 system_instruction=SYSTEM_INSTRUCTION,
