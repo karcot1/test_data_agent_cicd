@@ -82,6 +82,7 @@ Each file in `agent_configs/` describes one Data Agent with the fields the Conve
 | Field | Required | Maps to |
 | :--- | :---: | :--- |
 | `agent_id` | Yes | Data Agent ID. Starts with a lowercase letter; lowercase letters, digits, `_` or `-`; max 63 characters. |
+| `location` | No | Data Agent location (`global`, `us`, `eu`, etc.). Preserved by `export_agent`; defaults to the CLI `--location` (`global`) when omitted. |
 | `display_name`, `description` | No | `DataAgent.display_name`, `DataAgent.description` |
 | `source_project_id` | No | Project the agent was exported from. References to it are rewritten to the target project; other projects (e.g. `bigquery-public-data`) are left as-is. |
 | `system_instruction` | No | `Context.system_instruction` |

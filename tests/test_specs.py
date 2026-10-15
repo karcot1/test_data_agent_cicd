@@ -122,6 +122,12 @@ def test_source_project_remapped_to_target():
     assert ctx.system_instruction == "Use `prd-proj.sales.orders`."
 
 
+def test_config_location_overrides_default():
+    spec = specs.parse_agent_config(config(location="US"), "us.json", P, "global")
+    assert spec.location == "us"
+    assert spec.data_agent.name == f"projects/{P}/locations/us/dataAgents/demo_agent"
+
+
 def test_source_project_equal_to_target_is_noop():
     spec = specs.parse_agent_config(
         config(source_project_id=P, table_references=[{"project_id": P, "dataset_id": "d", "table_id": "t"}]),

@@ -80,13 +80,14 @@ def process_spec(spec, data_agent_client, registry, args) -> Result:
         result.changed_fields.append(f"agent_registry (missing in {missing})")
 
     if not args.dry_run:
-        registry.sync(spec.agent_id, spec.data_agent.description)
+        registry.sync(spec.agent_id, spec.data_agent.description, location=spec.location)
     return result
 
 
-def print_result(result: Result, dry_run: bool) -> None:
+def print_result(result: Result, dry_run: bool, location: str | None = None) -> None:
     prefix = "[PLAN] " if dry_run and result.action in (CREATE, MODIFY) else ""
-    line = f"{prefix}[{result.action}] {result.agent_id}  ({result.source})"
+    loc_tag = f" [{location}]" if location else ""
+    line = f"{prefix}[{result.action}] {result.agent_id}{loc_tag}  ({result.source})"
     if result.changed_fields:
         line += f"  changed: {', '.join(result.changed_fields)}"
     if result.error:
@@ -104,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(2)
 
     mode = "DRY RUN" if args.dry_run else "APPLY"
-    print(f"== Data Agent deployer ({mode}) project={args.project_id} location={args.location}")
+    print(f"== Data Agent deployer ({mode}) project={args.project_id} default_location={args.location}")
     print(f"== {len(all_specs)} agent definition(s) found\n")
     if not all_specs:
         return
@@ -114,7 +115,7 @@ def main(argv: list[str] | None = None) -> None:
     except AuthError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-    client = data_agent_client(credentials, args.location)
+    clients = {}
 
     results: list[Result] = []
     with httpx.Client(headers=auth_headers(credentials, args.project_id), timeout=60.0) as http:
@@ -124,10 +125,12 @@ def main(argv: list[str] | None = None) -> None:
 
         for spec in all_specs:
             try:
-                result = process_spec(spec, client, registry, args)
+                if spec.location not in clients:
+                    clients[spec.location] = data_agent_client(credentials, spec.location)
+                result = process_spec(spec, clients[spec.location], registry, args)
             except Exception as e:  # keep going; report at the end
                 result = Result(spec.agent_id, spec.source, ERROR, error=f"{type(e).__name__}: {e}")
-            print_result(result, args.dry_run)
+            print_result(result, args.dry_run, location=spec.location)
             results.append(result)
 
     counts = {a: sum(r.action == a for r in results) for a in (CREATE, MODIFY, SKIP, ERROR)}

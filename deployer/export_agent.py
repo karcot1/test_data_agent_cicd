@@ -42,7 +42,10 @@ from deployer import specs
 from deployer.auth import AuthError, get_credentials
 from deployer.endpoints import data_agent_client
 
-RESOURCE_RE = re.compile(r"projects/([^/]+)/locations/([^/]+)/dataAgents/([^/?#]+)")
+RESOURCE_RE = re.compile(
+    r"(?:projects/([^/]+)/locations/([^/]+)/dataAgents/([^/?#]+)"
+    r"|urn:agent:[^:]*:projects:([^:]+):locations:([^:]+):geminidataanalytics:dataAgents:([^/?#:]+))"
+)
 
 
 class ExportError(ValueError):
@@ -55,7 +58,10 @@ def parse_source(source: str) -> tuple[str, str, str]:
         raise ValueError(
             f"--source '{source}' must contain projects/<p>/locations/<l>/dataAgents/<id>."
         )
-    return match.group(1), match.group(2), match.group(3)
+    project = match.group(1) or match.group(4)
+    location = match.group(2) or match.group(5)
+    agent_id = match.group(3) or match.group(6)
+    return project, location, agent_id
 
 
 def default_agent_id(display_name: str, fallback: str) -> str:
@@ -68,7 +74,10 @@ def default_agent_id(display_name: str, fallback: str) -> str:
 
 
 def agent_to_config(
-    agent: geminidataanalytics.DataAgent, agent_id: str, source_project_id: str
+    agent: geminidataanalytics.DataAgent,
+    agent_id: str,
+    source_project_id: str,
+    location: str | None = None,
 ) -> dict:
     """Convert a live DataAgent into the agent_configs/ JSON schema.
 
@@ -84,8 +93,27 @@ def agent_to_config(
             "Publish the agent in BigQuery Studio first."
         )
 
+    if location is None:
+        try:
+            _, location, _ = parse_source(agent.name)
+        except ValueError:
+            location = "global"
+    location = location.lower()
+
+    # If --source used a numeric project number (e.g. from a BigQuery Studio URN),
+    # infer the string project_id from the agent's own table references when unambiguous.
+    if source_project_id.isdigit():
+        table_projects = {
+            t.project_id
+            for t in ctx.datasource_references.bq.table_references
+            if t.project_id and t.project_id != "bigquery-public-data"
+        }
+        if len(table_projects) == 1:
+            source_project_id = next(iter(table_projects))
+
     return {
         "agent_id": agent_id,
+        "location": location,
         "display_name": agent.display_name,
         "description": agent.description,
         "source_project_id": source_project_id,
@@ -147,7 +175,7 @@ def main(argv: list[str] | None = None) -> None:
 
     agent_id = args.agent_id or default_agent_id(agent.display_name, source_agent_id)
     try:
-        config = agent_to_config(agent, agent_id, project)
+        config = agent_to_config(agent, agent_id, project, location=location)
         # Validate with the same rules the deployer uses before writing anything.
         specs.parse_agent_config(config, args.out, project, location)
     except (ExportError, specs.SpecError) as e:
@@ -160,7 +188,7 @@ def main(argv: list[str] | None = None) -> None:
         f.write("\n")
 
     print(f"Wrote {args.out}")
-    print(f"  deploys as:      {agent_id}")
+    print(f"  deploys as:      {agent_id} (location: {config['location']})")
     print(f"  tables:          {len(config['table_references'])}")
     print(f"  example queries: {len(config['example_queries'])}")
     print(f"  glossary terms:  {len(config['glossary_terms'])}")

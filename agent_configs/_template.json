@@ -1,5 +1,6 @@
 {
   "agent_id": "<AGENT_ID>",
+  "location": "global",
   "display_name": "<AGENT_DISPLAY_NAME>",
   "description": "<AGENT_DESCRIPTION>",
   "source_project_id": "<SOURCE_PROJECT_ID>",

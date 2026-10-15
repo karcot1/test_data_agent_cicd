@@ -89,8 +89,11 @@ class AgentRegistry:
             if find_service(self.services(loc), agent_id) is None
         ]
 
-    def _build_payload(self, agent_id: str, description: str) -> dict:
-        card_url = a2a_agent_url(self.project_id, self.location, agent_id)
+    def _build_payload(
+        self, agent_id: str, description: str, location: str | None = None
+    ) -> dict:
+        agent_location = (location or self.location).lower()
+        card_url = a2a_agent_url(self.project_id, agent_location, agent_id)
         resp = self.client.get(f"{card_url}/v1/card")
         resp.raise_for_status()
         card = resp.json()
@@ -129,8 +132,10 @@ class AgentRegistry:
                 f"Agent Registry operation failed in '{reg_location}': {op_data['error']}"
             )
 
-    def sync(self, agent_id: str, description: str = "") -> None:
-        payload = self._build_payload(agent_id, description)
+    def sync(
+        self, agent_id: str, description: str = "", location: str | None = None
+    ) -> None:
+        payload = self._build_payload(agent_id, description, location=location)
         for reg_location in self.registry_locations:
             existing = find_service(self.services(reg_location), agent_id)
             if existing:

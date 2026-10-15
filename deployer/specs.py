@@ -18,6 +18,7 @@ No-code agents are declarative JSON files in agent_configs/ (see agent_configs/_
 
     {
       "agent_id": "sales_agent",                      # required, Data Agent ID
+      "location": "global",                           # optional, defaults to CLI --location ("global")
       "display_name": "Sales agent",
       "description": "Answers questions about sales.",
       "source_project_id": "my-dev-project",          # optional, see below
@@ -56,6 +57,7 @@ AGENT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 
 CONFIG_KEYS = {
     "agent_id",
+    "location",
     "display_name",
     "description",
     "source_project_id",
@@ -83,6 +85,7 @@ class AgentSpec:
     data_agent: geminidataanalytics.DataAgent
     # No-code agents are also published to Agent Registry; low-code agents are not.
     register: bool = False
+    location: str = "global"
 
 
 def agent_resource_name(project_id: str, location: str, agent_id: str) -> str:
@@ -146,10 +149,18 @@ def _project_rewriter(source_project_id: str | None, target_project_id: str):
     return lambda text: pattern.sub(f"{target_project_id}.", text)
 
 
-def parse_agent_config(data, source: str, project_id: str, location: str) -> AgentSpec:
+def parse_agent_config(data, source: str, project_id: str, location: str = "global") -> AgentSpec:
     """Validate a JSON agent config and build the desired DataAgent for `project_id`."""
     _check_object(data, CONFIG_KEYS, {"agent_id"}, f"Agent config '{source}'")
     agent_id = validate_agent_id(data["agent_id"], source)
+
+    raw_location = data.get("location")
+    if raw_location is None:
+        agent_location = location.lower()
+    elif isinstance(raw_location, str) and raw_location.strip():
+        agent_location = raw_location.strip().lower()
+    else:
+        raise SpecError(f"'{source}': location must be a non-empty string.")
 
     source_project_id = data.get("source_project_id")
     if source_project_id is not None and not isinstance(source_project_id, str):
@@ -236,17 +247,23 @@ def parse_agent_config(data, source: str, project_id: str, location: str) -> Age
         ),
     )
     data_agent = geminidataanalytics.DataAgent(
-        name=agent_resource_name(project_id, location, agent_id),
+        name=agent_resource_name(project_id, agent_location, agent_id),
         display_name=display_name,
         description=description,
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=published_context
         ),
     )
-    return AgentSpec(agent_id=agent_id, source=source, data_agent=data_agent, register=True)
+    return AgentSpec(
+        agent_id=agent_id,
+        source=source,
+        data_agent=data_agent,
+        register=True,
+        location=agent_location,
+    )
 
 
-def load_agent_configs(directory: str, project_id: str, location: str) -> list[AgentSpec]:
+def load_agent_configs(directory: str, project_id: str, location: str = "global") -> list[AgentSpec]:
     """Load every *.json in `directory`, except files starting with '_' (e.g. _template.json)."""
     specs = []
     for path in sorted(glob.glob(os.path.join(directory, "*.json"))):
@@ -275,10 +292,18 @@ def _import_module_from_path(path: str):
     return module
 
 
-def load_low_code_spec(path: str, project_id: str, location: str) -> AgentSpec:
+def load_low_code_spec(path: str, project_id: str, location: str = "global") -> AgentSpec:
     module = _import_module_from_path(path)
 
     agent_id = validate_agent_id(getattr(module, "AGENT_ID", None), path)
+
+    raw_location = getattr(module, "LOCATION", None)
+    if raw_location is None:
+        agent_location = location.lower()
+    elif isinstance(raw_location, str) and raw_location.strip():
+        agent_location = raw_location.strip().lower()
+    else:
+        raise SpecError(f"Low-code agent '{path}': LOCATION must be a non-empty string.")
 
     build_agent = getattr(module, "build_agent", None)
     if not callable(build_agent):
@@ -286,13 +311,13 @@ def load_low_code_spec(path: str, project_id: str, location: str) -> AgentSpec:
             f"Low-code agent '{path}' must define build_agent(project_id, location)."
         )
 
-    data_agent = build_agent(project_id, location)
+    data_agent = build_agent(project_id, agent_location)
     if not isinstance(data_agent, geminidataanalytics.DataAgent):
         raise SpecError(
             f"Low-code agent '{path}': build_agent() must return a geminidataanalytics.DataAgent."
         )
 
-    expected_name = agent_resource_name(project_id, location, agent_id)
+    expected_name = agent_resource_name(project_id, agent_location, agent_id)
     if not data_agent.name:
         data_agent.name = expected_name
     elif data_agent.name != expected_name:
@@ -301,10 +326,12 @@ def load_low_code_spec(path: str, project_id: str, location: str) -> AgentSpec:
             f"AGENT_ID (expected '{expected_name}'). Leave name unset to have it filled in."
         )
 
-    return AgentSpec(agent_id=agent_id, source=path, data_agent=data_agent)
+    return AgentSpec(
+        agent_id=agent_id, source=path, data_agent=data_agent, location=agent_location
+    )
 
 
-def load_low_code_specs(directory: str, project_id: str, location: str) -> list[AgentSpec]:
+def load_low_code_specs(directory: str, project_id: str, location: str = "global") -> list[AgentSpec]:
     return [
         load_low_code_spec(path, project_id, location)
         for path in sorted(glob.glob(os.path.join(directory, "*.py")))
