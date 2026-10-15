@@ -18,6 +18,8 @@ venv/
 !.env.example
 *-key.json
 *credentials*.json
+key.json
+service-account*.json
 
 # Editors and OS
 .vscode/

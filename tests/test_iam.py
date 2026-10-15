@@ -49,17 +49,42 @@ def test_add_members_preserves_others_and_conditions():
     assert {"role": "roles/iap.viewer", "members": [ALICE]} in policy["bindings"]
 
 
-def test_matches_agent():
+def card(project, agent_id):
+    url = f"https://x/v1/a2a/projects/{project}/locations/global/dataAgents/{agent_id}"
+    return {"a2aAgentDefinition": {"jsonAgentCard": json.dumps({"url": url})}}
+
+
+PROJECTS = {"my-proj", "123"}
+
+
+def test_matches_agent_by_exact_card_url():
     agent_ids = {"my_agent"}
-    assert iam.matches_agent({"displayName": "my_agent"}, agent_ids)
-    assert iam.matches_agent({"displayName": "my_agent [BQCA Agent]"}, agent_ids)
-    assert iam.matches_agent({"a2aAgentDefinition": {"jsonAgentCard": '{"url": ".../dataAgents/my_agent"}'}}, agent_ids)
-    assert not iam.matches_agent({"displayName": "my_agent_v2"}, agent_ids)
+    assert iam.matches_agent(card("my-proj", "my_agent"), agent_ids, PROJECTS)
+    assert iam.matches_agent(card("123", "my_agent"), agent_ids, PROJECTS)  # project number
+    # Same prefix, other project, or other agent: no match.
+    assert not iam.matches_agent(card("my-proj", "my_agent_v2"), agent_ids, PROJECTS)
+    assert not iam.matches_agent(card("my-proj", "my_agent-eu"), agent_ids, PROJECTS)
+    assert not iam.matches_agent(card("other-proj", "my_agent"), agent_ids, PROJECTS)
 
 
-def mock_client(policy, set_calls):
+def test_card_takes_precedence_over_display_name():
+    ge_agent = {"displayName": "my_agent", **card("my-proj", "other_agent")}
+    assert not iam.matches_agent(ge_agent, {"my_agent"}, PROJECTS)
+
+
+def test_matches_agent_by_exact_display_name_without_card():
+    agent_ids = {"my_agent"}
+    assert iam.matches_agent({"displayName": "my_agent"}, agent_ids, PROJECTS)
+    assert iam.matches_agent({"displayName": "my_agent [BQCA Agent]"}, agent_ids, PROJECTS)
+    assert not iam.matches_agent({"displayName": "my_agent_v2"}, agent_ids, PROJECTS)
+    assert not iam.matches_agent({"displayName": "my_agent team bot"}, agent_ids, PROJECTS)
+
+
+def mock_client(policy, set_calls, get_calls=None):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith(":getIamPolicy"):
+            if get_calls is not None:
+                get_calls.append(json.loads(request.content))
             return httpx.Response(200, json=policy)
         if request.url.path.endswith(":setIamPolicy"):
             set_calls.append(json.loads(request.content))
@@ -84,8 +109,30 @@ def test_ensure_bindings_dry_run_does_not_set():
     assert set_calls == []
 
 
-def test_ensure_bindings_sets_when_missing():
-    set_calls = []
-    client = mock_client({"etag": "e1", "bindings": []}, set_calls)
+def test_ensure_bindings_sets_when_missing_using_policy_version_3():
+    set_calls, get_calls = [], []
+    client = mock_client({"etag": "e1", "bindings": []}, set_calls, get_calls)
     iam.ensure_bindings(client, "https://x/projects/p", {"roles/iap.viewer": {ALICE}})
-    assert set_calls == [{"policy": {"etag": "e1", "bindings": [{"role": "roles/iap.viewer", "members": [ALICE]}]}}]
+    assert get_calls == [{"options": {"requestedPolicyVersion": 3}}]
+    assert set_calls == [{"policy": {
+        "etag": "e1", "version": 3, "bindings": [{"role": "roles/iap.viewer", "members": [ALICE]}],
+    }}]
+
+
+def test_discover_principals_follows_pagination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        page2 = request.url.params.get("pageToken") == "p2"
+        if request.url.path.endswith("/engines"):
+            if page2:
+                return httpx.Response(200, json={"engines": [{"name": "projects/123/engines/e2"}]})
+            return httpx.Response(200, json={"engines": [{"name": "projects/123/engines/e1"}], "nextPageToken": "p2"})
+        if "/engines/e2/" in request.url.path and page2:
+            return httpx.Response(200, json={"agents": [{
+                **card("my-proj", "my_agent"), "agentIdentityInfo": {"spiffeId": "//agents/a"},
+            }]})
+        if "/engines/e2/" in request.url.path:
+            return httpx.Response(200, json={"agents": [], "nextPageToken": "p2"})
+        return httpx.Response(200, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert iam.discover_principals(client, "my-proj", "123", {"my_agent"}) == {"principal://agents/a"}

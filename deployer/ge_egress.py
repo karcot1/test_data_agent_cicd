@@ -92,6 +92,9 @@ def main(argv: list[str] | None = None) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        except RuntimeError as e:  # setIamPolicy failures
+            print(f"[ERROR] {e}", file=sys.stderr)
+            sys.exit(1)
 
     if args.dry_run:
         print("\n[dry run: nothing was changed]")

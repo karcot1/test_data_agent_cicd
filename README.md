@@ -10,6 +10,8 @@ Two helper commands are run by hand rather than in the pipeline:
 - `python -m deployer.export_agent` saves a published agent as a JSON config in `agent_configs/`.
 - `python -m deployer.ge_egress` grants Gemini Enterprise agent identities the IAP egress roles they need to call your Data Agents.
 
+This repository accompanies the Google Cloud Blog post [AgentOps for Conversational Analytics in BigQuery](<BLOG_POST_URL>).
+
 ---
 
 ## 📁 Repository Structure
@@ -20,6 +22,7 @@ Two helper commands are run by hand rather than in the pipeline:
 │   ├── _template.json                     # Annotated template (files starting with _ are not deployed)
 │   └── thelook_ecommerce_agent.json       # Sample agent on the public theLook eCommerce dataset
 ├── low_code_agents/                       # Low-code agents: one Python module per agent (AGENT_ID + build_agent)
+│   └── google_trends_data_agent.py        # Sample agent on the public Google Trends dataset
 ├── deployer/                              # Deployer package
 │   ├── __main__.py / cli.py               # python -m deployer: load → reconcile → Agent Registry → summary
 │   ├── specs.py                           # Loads and validates agent configs / low-code modules into AgentSpecs
@@ -61,7 +64,7 @@ For every agent definition, the deployer:
 - **Builds the desired `DataAgent`.**
   - From a JSON config (see [Agent config schema](#agent-config-schema)): system instruction, tables, example queries, glossary terms and options. Tables, example SQL and the system instruction that point to `source_project_id` are rewritten to `--project_id`, so the same config promotes from DEV to STG and PRD.
   - From a low-code module, `build_agent()` returns the `DataAgent` directly.
-- **Diffs it against the live agent** (`display_name`, `description`, `system_instruction`, `table_references`, `example_queries`, `glossary_terms`, `python_enabled`, soft-delete state) and prints one of:
+- **Diffs it against the live agent** (`display_name`, `description`, `labels`, `system_instruction`, `table_references`, `example_queries`, `glossary_terms`, `python_enabled`, `model`, the BigQuery Studio draft (`staging_context`), soft-delete state) and prints one of:
   - `[CREATE]`: the agent doesn't exist. An ID that was soft-deleted (`409 AlreadyExists`, 30-day retention) is restored in place with `update_data_agent()`.
   - `[MODIFY]`: one or more fields changed. The changed fields are listed.
   - `[SKIP]`: already up to date. No API writes.
@@ -70,7 +73,7 @@ For every agent definition, the deployer:
   2. normalizes `preferredTransport` to `HTTP+JSON` for `a2a-sdk`
   3. `PATCH`es or `POST`s the service, then polls the operation (60-second timeout)
 
-A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions stop the run with exit code `2` before anything is changed. That covers bad JSON, unknown or misspelled keys, an invalid `agent_id`, duplicate IDs, and a config with no tables.
+A failure on one agent doesn't stop the others. The run prints a summary and exits non-zero if anything failed. Invalid definitions stop the run with exit code `2` before anything is changed. That covers bad JSON, unknown or misspelled keys, an invalid `agent_id`, duplicate IDs, IDs that map to the same Agent Registry service (such as `sales_agent` and `sales-agent`), a config with no tables, and low-code modules that fail to import or build.
 
 > [!NOTE]
 > Agent Registry entries are stored per location and are **not** replicated between locations. Publish to more than `global` only if a consumer reads from another location, for example `_DEPLOY_ARGS="--registry_locations global us-central1"` on the Cloud Build trigger. Entries that already exist in other locations are left in place; delete them manually if they're no longer needed.
@@ -123,12 +126,13 @@ Limitations:
 
   def build_agent(project_id: str, location: str) -> geminidataanalytics.DataAgent:
       return geminidataanalytics.DataAgent(
+          display_name="My low-code agent",
           data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
               published_context=geminidataanalytics.Context(...)
           )
       )
   ```
-  Leave `name` unset; the deployer fills it in from `AGENT_ID`, which follows the same rules as `agent_id`. Files starting with `_` are ignored, so you can use them for shared helpers.
+  Leave `name` unset; the deployer fills it in from `AGENT_ID`, which follows the same rules as `agent_id`. If you don't set `staging_context`, the deployer copies `published_context` into it, as it does for JSON configs. Files starting with `_` are ignored, so you can use them for shared helpers.
 
 ### Gemini Enterprise egress IAM (manual)
 This step is **not** in the pipeline. Run it only after you've added one or more Data Agents to a Gemini Enterprise app. Without it, GE calls to the agent fail with `403: Egress request is not authorized`.
@@ -157,8 +161,11 @@ PROJECT_ID=<PROJECT_ID> AGENT_ID=thelook_ecommerce_agent python examples/deploy_
 Set `LOCATION` too if the agent isn't in `global`.
 
 ### Running locally
+Requires Python 3.11 or later and the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install).
 ```bash
+python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+gcloud auth application-default login
 .venv/bin/python -m pytest -q
 .venv/bin/python -m deployer --project_id=<PROJECT_ID> --dry-run
 ```
@@ -194,6 +201,10 @@ gcloud artifacts repositories create agent-repo --repository-format=docker --loc
 | | `roles/artifactregistry.writer` | `agent-repo` repository | Push the deployer image. |
 | | `roles/logging.logWriter` | Deployment project | Write build logs (`CLOUD_LOGGING_ONLY`). |
 | | `roles/bigquery.dataViewer` | Datasets the agents reference | The API checks that every referenced table exists when it creates or updates an agent. |
+| **Pull-request (plan) trigger service account**<br>(a separate, read-only account; see [Securing the pull-request trigger](#securing-the-pull-request-trigger)) | `roles/geminidataanalytics.dataAgentViewer` | Deployment project | Read live Data Agents to compute the plan. |
+| | `roles/agentregistry.viewer` | Deployment project | Check which agents are already registered. |
+| | `roles/artifactregistry.reader` | `agent-repo` repository | Pull the cached deployer image. |
+| | `roles/logging.logWriter` | Deployment project | Write build logs. |
 | **Person running `deployer.export_agent`** | `roles/geminidataanalytics.dataAgentViewer` | Project that owns the source agent | Read the Data Agent definition from the API. |
 | **Person running `deployer.ge_egress`** | `roles/discoveryengine.viewer` | Deployment project | List Gemini Enterprise apps and agents. |
 | | Permission to update IAM, e.g. `roles/iam.securityAdmin` | Deployment project | Add the IAP egress bindings on the project and `iap_web`. |
@@ -211,22 +222,41 @@ gcloud artifacts repositories create agent-repo --repository-format=docker --loc
 Connect the GitHub repository to **Google Cloud Build** and create triggers under **Cloud Build > Triggers** pointing at `/cloudbuild.yaml`. The pipeline:
 1. pulls the previous `agent-deployer:latest` image to use as a layer cache
 2. builds the dependencies-only image (`deployer/Dockerfile`)
-3. pushes the image, and runs the unit tests at the same time
+3. pushes the image (unless `_PUSH_IMAGE=false`), and runs the unit tests at the same time
 4. runs `python -m deployer --project_id=$PROJECT_ID ${_DEPLOY_ARGS}`
 
 | Example Trigger Name | Config File | Substitutions | Description |
 | :--- | :--- | :--- | :--- |
 | **`deploy-bq-data-agent`** *(push to main)* | `/cloudbuild.yaml` | *None* (uses built-in `$PROJECT_ID`) | Creates/updates only the changed Data Agents and syncs Agent Registry (`global` by default). |
-| **`plan-bq-data-agent`** *(pull requests)* | `/cloudbuild.yaml` | **`_DEPLOY_ARGS`**: `--dry-run` | Same pipeline in dry-run mode: reports planned `[CREATE]` / `[MODIFY]` / `[SKIP]` actions without changing anything. |
+| **`plan-bq-data-agent`** *(pull requests)* | `/cloudbuild.yaml` | **`_DEPLOY_ARGS`**: `--dry-run`<br>**`_PUSH_IMAGE`**: `false` | Same pipeline in dry-run mode: reports planned `[CREATE]` / `[MODIFY]` / `[SKIP]` actions without changing anything. |
 
 Other substitutions:
 - **`_DEPLOY_ARGS`**: extra deployer flags, e.g. `--registry_locations global us-central1` or `--skip-registry`.
 - **`_DEPLOYER_IMAGE`**: the image path. Default `us-docker.pkg.dev/${PROJECT_ID}/agent-repo/agent-deployer`.
+- **`_PUSH_IMAGE`**: set to `false` to skip pushing the image (default `true`).
+
+### Securing the pull-request trigger
+A pull-request build runs the code **from the pull request**: its `cloudbuild.yaml`, its tests and its `low_code_agents/` modules. Anyone who opens a pull request can change those files, including removing `--dry-run`. So `--dry-run` is not a security boundary. What a PR build can do is limited by how the trigger is configured in Google Cloud, which a pull request can't change:
+- **Run it as a separate, read-only service account** (roles in [Required IAM Permissions](#2-required-iam-permissions)). Even a malicious build then can't create or modify agents, or push the image.
+- **Require a maintainer to comment `/gcbrun`** on the pull request before the build runs (comment control).
+- **Protect `main`** with required reviews, since the deploy trigger runs whatever is merged with the deploy service account.
+
+```bash
+gcloud builds triggers create github \
+    --name=plan-bq-data-agent \
+    --repo-owner=<GITHUB_OWNER> --repo-name=<GITHUB_REPO> \
+    --pull-request-pattern='^main$' \
+    --comment-control=COMMENTS_ENABLED \
+    --build-config=cloudbuild.yaml \
+    --service-account=projects/<PROJECT_ID>/serviceAccounts/<PLAN_SERVICE_ACCOUNT_EMAIL> \
+    --substitutions=_DEPLOY_ARGS=--dry-run,_PUSH_IMAGE=false
+```
 
 To run the pipeline once without a trigger:
 ```bash
 gcloud builds submit --config cloudbuild.yaml .
 ```
+This uploads your working directory as it is, including uncommitted files. Any JSON file in `agent_configs/` is deployed, even if it isn't committed.
 
 ---
 
@@ -244,7 +274,19 @@ gcloud builds submit --config cloudbuild.yaml .
 | **`400 Bad Request` from `agentregistry.googleapis.com/.../services?serviceId=...`** | Agent Registry limits `serviceId` and `displayName` to **63 characters**. | Handled in `deployer/registry.py`, which truncates both to 63 characters. |
 | **`no compatible transports found`** when an `a2a-sdk` client loads the registered card | Gemini Data Analytics returns `"preferredTransport": "HTTP_JSON"`, but `a2a-sdk` 1.x expects `"HTTP+JSON"`. | Handled in `deployer/registry.py`, which normalizes `preferredTransport` to `HTTP+JSON` before registering. |
 | **`403 Forbidden` on `.../dataAgents/<id>/v1/message:send`** | The calling identity lacks permission to chat with the agent or to query its tables. | Grant the caller the roles in the "Anyone chatting with a Data Agent" rows above, including `roles/bigquery.dataViewer` on every project that owns a referenced table. Send the `x-goog-user-project` header on A2A requests. |
-| **Cloud Build `deploy` step fails with `403` from `discoveryengine.googleapis.com`** | An older pipeline version ran the GE egress step in Cloud Build. | Update to the current `cloudbuild.yaml`. The egress step is now manual (`deployer.ge_egress`). |
+
+---
+
+## 🧹 Costs and Clean-up
+
+This pipeline uses billable services: Cloud Build, Artifact Registry storage, and the BigQuery queries the agents run. Check the pricing pages of Conversational Analytics in BigQuery, Agent Registry and Gemini Enterprise for the services you use.
+
+To remove what the pipeline created:
+1. Delete the Cloud Build triggers: `gcloud builds triggers delete <TRIGGER_NAME>`.
+2. Delete the Data Agents in BigQuery Studio. Deleted agents keep their ID for 30 days.
+3. Delete the agents' services from Agent Registry in the Google Cloud console.
+4. Delete the image repository: `gcloud artifacts repositories delete agent-repo --location=us`.
+5. If you ran `deployer.ge_egress`, remove the IAP egress bindings it added.
 
 ---
 

@@ -64,6 +64,19 @@ def _glossary(ctx) -> list[tuple]:
     ]
 
 
+def _context_diff(existing_ctx, desired_ctx) -> list[str]:
+    """Names of the Context fields managed by this repo that differ."""
+    checks = {
+        "system_instruction": lambda c: c.system_instruction.strip(),
+        "table_references": _tables,
+        "example_queries": _examples,
+        "glossary_terms": _glossary,
+        "python_enabled": lambda c: c.options.analysis.python.enabled,
+        "model": lambda c: c.options.model,
+    }
+    return [name for name, get in checks.items() if get(existing_ctx) != get(desired_ctx)]
+
+
 def diff_data_agent(
     existing: geminidataanalytics.DataAgent,
     desired: geminidataanalytics.DataAgent,
@@ -87,40 +100,15 @@ def diff_data_agent(
     if dict(existing.labels) != dict(desired.labels):
         changed.append("labels")
 
-    existing_ctx = existing.data_analytics_agent.published_context
-    desired_ctx = desired.data_analytics_agent.published_context
-
-    if existing_ctx.system_instruction.strip() != desired_ctx.system_instruction.strip():
-        changed.append("system_instruction")
-
-    if _tables(existing_ctx) != _tables(desired_ctx):
-        changed.append("table_references")
-
-    if _examples(existing_ctx) != _examples(desired_ctx):
-        changed.append("example_queries")
-
-    if _glossary(existing_ctx) != _glossary(desired_ctx):
-        changed.append("glossary_terms")
-
-    if existing_ctx.options.analysis.python.enabled != desired_ctx.options.analysis.python.enabled:
-        changed.append("python_enabled")
-
-    if existing_ctx.options.model != desired_ctx.options.model:
-        changed.append("model")
+    existing_agent = existing.data_analytics_agent
+    desired_agent = desired.data_analytics_agent
+    changed += _context_diff(existing_agent.published_context, desired_agent.published_context)
 
     # Keep staging_context (what the BigQuery Studio UI displays) in sync with the deployed spec.
-    desired_staging = desired.data_analytics_agent.staging_context
-    if desired_staging != geminidataanalytics.Context():
-        existing_staging = existing.data_analytics_agent.staging_context
-        if (
-            existing_staging.system_instruction.strip() != desired_staging.system_instruction.strip()
-            or _tables(existing_staging) != _tables(desired_staging)
-            or _examples(existing_staging) != _examples(desired_staging)
-            or _glossary(existing_staging) != _glossary(desired_staging)
-            or existing_staging.options.analysis.python.enabled != desired_staging.options.analysis.python.enabled
-            or existing_staging.options.model != desired_staging.options.model
-        ):
-            changed.append("staging_context")
+    if desired_agent.staging_context != geminidataanalytics.Context() and _context_diff(
+        existing_agent.staging_context, desired_agent.staging_context
+    ):
+        changed.append("staging_context")
 
     return changed
 

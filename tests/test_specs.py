@@ -128,6 +128,17 @@ def test_config_location_overrides_default():
     assert spec.data_agent.name == f"projects/{P}/locations/us/dataAgents/demo_agent"
 
 
+def test_source_project_id_is_stripped():
+    spec = specs.parse_agent_config(
+        config(
+            source_project_id=" dev-proj ",
+            table_references=[{"project_id": "dev-proj", "dataset_id": "d", "table_id": "t"}],
+        ),
+        "strip.json", "prd-proj", L,
+    )
+    assert tables(spec) == [("prd-proj", "d", "t")]
+
+
 def test_source_project_equal_to_target_is_noop():
     spec = specs.parse_agent_config(
         config(source_project_id=P, table_references=[{"project_id": P, "dataset_id": "d", "table_id": "t"}]),
@@ -179,6 +190,9 @@ def test_null_optional_strings_become_empty():
     ({"options": False}, "must be an object"),
     ({"labels": ["not-a-dict"]}, "labels must be an object"),
     ({"labels": {"k": 1}}, "labels must be an object"),
+    ({"source_project_id": ""}, "source_project_id must be a non-empty string"),
+    ({"source_project_id": "   "}, "source_project_id must be a non-empty string"),
+    ({"source_project_id": 7}, "source_project_id must be a non-empty string"),
     ({"description": 3}, "must be a string"),
 ])
 def test_invalid_config_rejected(overrides, match):
@@ -253,6 +267,8 @@ def test_low_code_loader_ignores_private_modules(tmp_path):
     ("AGENT_ID = 'Bad Id'\n", "agent_id"),
     ("AGENT_ID = 'a'\n", "build_agent"),
     ("AGENT_ID = 'a'\ndef build_agent(p, l): return {}\n", "DataAgent"),
+    ("import does_not_exist_xyz\n", "failed to import: ModuleNotFoundError"),
+    ("AGENT_ID = 'a'\ndef build_agent(p, l): raise KeyError('boom')\n", r"build_agent\(\) raised KeyError"),
 ])
 def test_low_code_loader_errors(tmp_path, body, match):
     write(tmp_path, "bad.py", body)
@@ -276,3 +292,18 @@ def test_validate_rejects_duplicates():
     b = specs.AgentSpec("dup", "b.py", geminidataanalytics.DataAgent())
     with pytest.raises(specs.SpecError, match="Duplicate"):
         specs.validate([a, b])
+
+
+def test_validate_rejects_registry_service_id_collisions():
+    a = specs.AgentSpec("sales_agent", "a.json", geminidataanalytics.DataAgent(), register=True)
+    b = specs.AgentSpec("sales-agent", "b.json", geminidataanalytics.DataAgent(), register=True)
+    with pytest.raises(specs.SpecError, match="same Agent Registry service 'sales-agent'"):
+        specs.validate([a, b])
+    # Low-code agents aren't registered, so they can't collide.
+    specs.validate([a, specs.AgentSpec("sales-agent", "b.py", geminidataanalytics.DataAgent())])
+
+
+def test_repo_low_code_agents_keep_staging_in_sync():
+    for spec in specs.load_low_code_specs(os.path.join(REPO_ROOT, "low_code_agents"), P, L):
+        analytics = spec.data_agent.data_analytics_agent
+        assert analytics.staging_context == analytics.published_context

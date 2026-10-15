@@ -49,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--registry_locations",
         nargs="+",
+        type=str.lower,
         default=list(DEFAULT_REGISTRY_LOCATIONS),
         help="Agent Registry locations to publish no-code agents to (default: global). "
         "Example: --registry_locations global us-central1",

@@ -20,7 +20,7 @@ it must define AGENT_ID and build_agent(project_id, location).
 
 from google.cloud import geminidataanalytics
 
-AGENT_ID = "test_low_code_agent"
+AGENT_ID = "google_trends_agent"
 
 SYSTEM_INSTRUCTION = """
 system_instruction:
@@ -83,8 +83,14 @@ TABLES = [
 
 
 def build_agent(project_id: str, location: str) -> geminidataanalytics.DataAgent:
-    """Return the desired DataAgent. The deployer fills in `name` from AGENT_ID."""
+    """Return the desired DataAgent.
+
+    The deployer fills in `name` from AGENT_ID and copies published_context to
+    staging_context, so BigQuery Studio shows what was deployed.
+    """
     return geminidataanalytics.DataAgent(
+        display_name="Google Trends analyst",
+        description="Answers questions about top and rising Google Search terms by US metro area.",
         data_analytics_agent=geminidataanalytics.DataAnalyticsAgent(
             published_context=geminidataanalytics.Context(
                 system_instruction=SYSTEM_INSTRUCTION,

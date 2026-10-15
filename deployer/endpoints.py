@@ -39,6 +39,7 @@ def gda_host(location: str) -> str:
 
 def a2a_agent_url(project_id: str, location: str, agent_id: str) -> str:
     """Base URL of a Data Agent's A2A endpoint (append /v1/card for its agent card)."""
+    location = location.lower()
     return (
         f"https://{gda_host(location)}/v1/a2a/projects/{project_id}"
         f"/locations/{location}/dataAgents/{agent_id}"

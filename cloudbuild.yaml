@@ -23,7 +23,10 @@
 # Gemini Enterprise egress IAM is NOT part of this pipeline. After adding agents
 # to a GE app, run it manually: python -m deployer.ge_egress --project_id=...
 #
-# For a pull-request trigger, set the substitution _DEPLOY_ARGS=--dry-run.
+# For a pull-request trigger, set the substitutions _DEPLOY_ARGS=--dry-run and
+# _PUSH_IMAGE=false, and run it as a separate read-only service account with
+# comment control enabled. A pull request can edit this file, so --dry-run alone
+# is not a security boundary; the trigger's service account is. See the README.
 #
 # Prerequisite: the Artifact Registry repository in _DEPLOYER_IMAGE must exist.
 # Create it once with:
@@ -32,6 +35,7 @@
 substitutions:
   _DEPLOYER_IMAGE: us-docker.pkg.dev/${PROJECT_ID}/agent-repo/agent-deployer
   _DEPLOY_ARGS: ''
+  _PUSH_IMAGE: 'true'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -58,10 +62,14 @@ steps:
       - '.'
 
   # Runs alongside the tests; keeps the layer cache warm for the next build.
+  # Skipped when _PUSH_IMAGE=false (pull-request builds), so PR builds can't replace :latest.
   - id: 'push-image'
     name: 'gcr.io/cloud-builders/docker'
     waitFor: ['build-image']
-    args: ['push', '--all-tags', '${_DEPLOYER_IMAGE}']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'if [ "${_PUSH_IMAGE}" = "true" ]; then docker push --all-tags ${_DEPLOYER_IMAGE}; else echo "Skipping image push"; fi'
 
   - id: 'test'
     name: '${_DEPLOYER_IMAGE}:${BUILD_ID}'

@@ -30,7 +30,7 @@ from google.auth.transport.requests import Request
 
 credentials, default_project = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 PROJECT = os.environ.get("PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT") or default_project
-LOCATION = os.environ.get("LOCATION", "global")
+LOCATION = os.environ.get("LOCATION", "global").strip().lower()
 AGENT_ID = os.environ.get("AGENT_ID", "thelook_ecommerce_agent")
 
 # Agents outside "global" are only served by their regional endpoint.

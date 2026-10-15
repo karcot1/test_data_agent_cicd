@@ -52,6 +52,8 @@ from dataclasses import dataclass
 
 from google.cloud import geminidataanalytics
 
+from deployer.registry import service_id_for
+
 # Data Agent IDs accepted by the API: a lowercase letter, then up to 62 lowercase
 # letters, digits, underscores or hyphens.
 AGENT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
@@ -166,8 +168,10 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
         raise SpecError(f"'{source}': location must be a non-empty string.")
 
     source_project_id = data.get("source_project_id")
-    if source_project_id is not None and not isinstance(source_project_id, str):
-        raise SpecError(f"'{source}': source_project_id must be a string.")
+    if source_project_id is not None:
+        if not isinstance(source_project_id, str) or not source_project_id.strip():
+            raise SpecError(f"'{source}': source_project_id must be a non-empty string.")
+        source_project_id = source_project_id.strip()
     rewrite = _project_rewriter(source_project_id, project_id)
 
     tables = _check_list(data.get("table_references"), f"'{source}': table_references")
@@ -309,7 +313,10 @@ def _import_module_from_path(path: str):
     if module_spec is None or module_spec.loader is None:
         raise SpecError(f"Could not import low-code agent module '{path}'.")
     module = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
+    try:
+        module_spec.loader.exec_module(module)
+    except Exception as e:
+        raise SpecError(f"Low-code agent '{path}' failed to import: {type(e).__name__}: {e}") from e
     return module
 
 
@@ -332,7 +339,12 @@ def load_low_code_spec(path: str, project_id: str, location: str = "global") -> 
             f"Low-code agent '{path}' must define build_agent(project_id, location)."
         )
 
-    data_agent = build_agent(project_id, agent_location)
+    try:
+        data_agent = build_agent(project_id, agent_location)
+    except Exception as e:
+        raise SpecError(
+            f"Low-code agent '{path}': build_agent() raised {type(e).__name__}: {e}"
+        ) from e
     if not isinstance(data_agent, geminidataanalytics.DataAgent):
         raise SpecError(
             f"Low-code agent '{path}': build_agent() must return a geminidataanalytics.DataAgent."
@@ -346,6 +358,11 @@ def load_low_code_spec(path: str, project_id: str, location: str = "global") -> 
             f"Low-code agent '{path}': DataAgent.name '{data_agent.name}' does not match "
             f"AGENT_ID (expected '{expected_name}'). Leave name unset to have it filled in."
         )
+
+    # Like JSON configs, keep the draft that BigQuery Studio shows in sync with what's deployed.
+    analytics = data_agent.data_analytics_agent
+    if analytics.staging_context == geminidataanalytics.Context():
+        analytics.staging_context = analytics.published_context
 
     return AgentSpec(
         agent_id=agent_id, source=path, data_agent=data_agent, location=agent_location
@@ -364,6 +381,7 @@ def load_low_code_specs(directory: str, project_id: str, location: str = "global
 
 def validate(specs: list[AgentSpec]) -> None:
     seen: dict[str, str] = {}
+    services: dict[str, AgentSpec] = {}
     for spec in specs:
         if spec.agent_id in seen:
             raise SpecError(
@@ -371,3 +389,15 @@ def validate(specs: list[AgentSpec]) -> None:
                 f"and '{spec.source}'."
             )
         seen[spec.agent_id] = spec.source
+
+        # Agent Registry service IDs replace '_' with '-' and are truncated, so distinct
+        # agent IDs can map to the same service and overwrite each other's entry.
+        if spec.register:
+            service_id = service_id_for(spec.agent_id)
+            other = services.setdefault(service_id, spec)
+            if other is not spec:
+                raise SpecError(
+                    f"Agent IDs '{other.agent_id}' ('{other.source}') and '{spec.agent_id}' "
+                    f"('{spec.source}') map to the same Agent Registry service '{service_id}'. "
+                    "Rename one of them."
+                )
