@@ -252,11 +252,15 @@ gcloud builds triggers create github \
     --substitutions=_DEPLOY_ARGS=--dry-run,_PUSH_IMAGE=false
 ```
 
-To run the pipeline once without a trigger:
+To run an existing trigger on demand, using what's committed on a branch:
+```bash
+gcloud builds triggers run deploy-bq-data-agent --branch=main
+```
+
+To test the pipeline from your machine without a trigger (uploads your local folder as it is, including uncommitted files):
 ```bash
 gcloud builds submit --config cloudbuild.yaml .
 ```
-This uploads your working directory as it is, including uncommitted files. Any JSON file in `agent_configs/` is deployed, even if it isn't committed.
 
 ---
 
