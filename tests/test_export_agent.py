@@ -76,11 +76,6 @@ def test_agent_to_config_exports_published_context_only():
     }
 
 
-def test_agent_to_config_infers_project_id_when_source_is_project_number():
-    config = agent_to_config(live_agent(), "sales_agent", "897406910578")
-    assert config["source_project_id"] == "dev"
-
-
 def test_exported_config_round_trips_through_deployer():
     config = agent_to_config(live_agent(), "sales_agent", "dev")
     # Even when the CLI default location is "global", the exported "us" location is preserved.
@@ -117,7 +112,6 @@ def test_default_agent_id(display_name, expected):
     "projects/p1/locations/global/dataAgents/agent_9c-1",
     "https://geminidataanalytics.googleapis.com/v1/a2a/projects/p1/locations/global/dataAgents/agent_9c-1",
     "https://geminidataanalytics.googleapis.com/v1beta/a2a/projects/p1/locations/global/dataAgents/agent_9c-1/v1/card",
-    "urn:agent:projects-p1:projects:p1:locations:global:geminidataanalytics:dataAgents:agent_9c-1",
 ])
 def test_parse_source_accepts_name_or_url(source):
     assert parse_source(source) == ("p1", "global", "agent_9c-1")

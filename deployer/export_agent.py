@@ -42,10 +42,7 @@ from deployer import specs
 from deployer.auth import AuthError, get_credentials
 from deployer.endpoints import data_agent_client
 
-RESOURCE_RE = re.compile(
-    r"(?:projects/([^/]+)/locations/([^/]+)/dataAgents/([^/?#]+)"
-    r"|urn:agent:[^:]*:projects:([^:]+):locations:([^:]+):geminidataanalytics:dataAgents:([^/?#:]+))"
-)
+RESOURCE_RE = re.compile(r"projects/([^/]+)/locations/([^/]+)/dataAgents/([^/?#]+)")
 
 
 class ExportError(ValueError):
@@ -58,10 +55,7 @@ def parse_source(source: str) -> tuple[str, str, str]:
         raise ValueError(
             f"--source '{source}' must contain projects/<p>/locations/<l>/dataAgents/<id>."
         )
-    project = match.group(1) or match.group(4)
-    location = match.group(2) or match.group(5)
-    agent_id = match.group(3) or match.group(6)
-    return project, location, agent_id
+    return match.group(1), match.group(2), match.group(3)
 
 
 def default_agent_id(display_name: str, fallback: str) -> str:
@@ -99,17 +93,6 @@ def agent_to_config(
         except ValueError:
             location = "global"
     location = location.lower()
-
-    # If --source used a numeric project number (e.g. from a BigQuery Studio URN),
-    # infer the string project_id from the agent's own table references when unambiguous.
-    if source_project_id.isdigit():
-        table_projects = {
-            t.project_id
-            for t in ctx.datasource_references.bq.table_references
-            if t.project_id and t.project_id != "bigquery-public-data"
-        }
-        if len(table_projects) == 1:
-            source_project_id = next(iter(table_projects))
 
     return {
         "agent_id": agent_id,
