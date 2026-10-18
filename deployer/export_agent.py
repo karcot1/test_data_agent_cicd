@@ -124,6 +124,7 @@ def agent_to_config(
         "options": {
             "python_enabled": ctx.options.analysis.python.enabled,
             "model": ctx.options.model.name,
+            "max_billed_bytes": ctx.options.datasource.big_query_max_billed_bytes or 0,
         },
     }
 

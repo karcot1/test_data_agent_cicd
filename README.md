@@ -6,9 +6,9 @@ A single deployer (`python -m deployer`) reads every agent definition in the rep
 - **No-code**: a declarative JSON config exported from a published BigQuery agent, saved in `agent_configs/`.
 - **Low-code**: a small Python module in `low_code_agents/` that builds the `DataAgent` with the `google-cloud-geminidataanalytics` SDK.
 
-Two helper commands are run by hand rather than in the pipeline:
-- `python -m deployer.export_agent` saves a published agent as a JSON config in `agent_configs/`.
-- `python -m deployer.ge_egress` grants Gemini Enterprise agent identities the IAP egress roles they need to call your Data Agents.
+Two commands are run by hand rather than in the pipeline:
+- `python -m deployer.export_agent` saves a published agent as a JSON config in `agent_configs/`. It's part of the core workflow.
+- `python -m deployer.ge_egress` is an optional helper for connecting agents to a Gemini Enterprise app. It grants the GE agent identities the IAP egress roles they need to call your Data Agents. It isn't part of the core deployer and isn't covered by the test suite; see [Gemini Enterprise egress IAM (optional helper)](#gemini-enterprise-egress-iam-optional-helper).
 
 This repository accompanies the Google Cloud Blog post [AgentOps for Conversational Analytics in BigQuery](<BLOG_POST_URL>).
 
@@ -30,11 +30,11 @@ This repository accompanies the Google Cloud Blog post [AgentOps for Conversatio
 │   ├── registry.py                        # Agent Registry sync (locations configurable, default: global)
 │   ├── export_agent.py                    # python -m deployer.export_agent: save a published agent as a config
 │   ├── endpoints.py                       # Global vs. regional Gemini Data Analytics endpoints
-│   ├── ge_egress.py                       # python -m deployer.ge_egress: manual Gemini Enterprise egress IAM
+│   ├── ge_egress.py                       # Optional GE helper (not core, not tested end to end): python -m deployer.ge_egress
 │   ├── iam.py                             # IAP egress binding logic used by ge_egress
 │   ├── auth.py                            # ADC with gcloud fallback
 │   └── Dockerfile                         # Dependencies-only image used by the Cloud Build steps
-├── tests/                                 # Offline unit tests (no GCP calls)
+├── tests/                                 # Offline tests for the core deployer (no GCP calls or credentials needed)
 ├── examples/
 │   ├── deploy_a2a.py                      # Standalone A2A client for manually testing a Data Agent endpoint
 │   └── requirements.txt                   # Dependencies for the example (a2a-sdk, etc.)
@@ -64,7 +64,7 @@ For every agent definition, the deployer:
 - **Builds the desired `DataAgent`.**
   - From a JSON config (see [Agent config schema](#agent-config-schema)): system instruction, tables, example queries, glossary terms and options. Tables, example SQL and the system instruction that point to `source_project_id` are rewritten to `--project_id`, so the same config promotes from DEV to STG and PRD.
   - From a low-code module, `build_agent()` returns the `DataAgent` directly.
-- **Diffs it against the live agent** (`display_name`, `description`, `labels`, `system_instruction`, `table_references`, `example_queries`, `glossary_terms`, `python_enabled`, `model`, the BigQuery Studio draft (`staging_context`), soft-delete state) and prints one of:
+- **Diffs it against the live agent.** Every field the deployer owns is compared: `display_name`, `description`, `labels`, the whole published context (including settings the config format can't express, such as table/column schema metadata, schema relationships and user functions), the BigQuery Studio draft (`staging_context`) and soft-delete state. Only server-managed fields (timestamps, `last_published_context`, `kms_key`) are ignored. It then prints one of:
   - `[CREATE]`: the agent doesn't exist. An ID that was soft-deleted (`409 AlreadyExists`, 30-day retention) is restored in place with `update_data_agent()`.
   - `[MODIFY]`: one or more fields changed. The changed fields are listed.
   - `[SKIP]`: already up to date. No API writes.
@@ -95,6 +95,7 @@ Each file in `agent_configs/` describes one Data Agent with the fields the Conve
 | `glossary_terms` | No | `Context.glossary_terms` (`display_name`, `description`, `labels`) |
 | `options.python_enabled` | No | `Context.options.analysis.python.enabled` (default `false`) |
 | `options.model` | No | `Context.options.model` (`"MODEL_UNSPECIFIED"` or `"LATEST_GA_MODEL"`; default `"MODEL_UNSPECIFIED"`) |
+| `options.max_billed_bytes` | No | `Context.options.datasource.big_query_max_billed_bytes`: the "Maximum bytes billed" setting in BigQuery Studio. A whole number of bytes; `0` or omitted means no limit. |
 
 Unknown keys are rejected, so typos fail the build instead of being silently ignored.
 
@@ -102,11 +103,11 @@ Unknown keys are rejected, so typos fail the build instead of being silently ign
 > The deployer assumes dataset and table names are the same in every environment. The Conversational Analytics API checks that every referenced table exists in the target project, even if it's empty.
 
 Limitations:
-- `source_project_id` rewriting only matches the `project.dataset.table` form. References written as `` `project`.dataset.table `` or `project:dataset.table` are left unchanged.
-- The schema doesn't cover table and column descriptions or schema relationships. `deployer.export_agent` doesn't export them, and the deployer doesn't set them.
+- `source_project_id` rewriting handles `project.dataset.table`, `` `project.dataset.table` `` and BigQuery Studio's `` `project`.`dataset`.`table` ``, and only in the project position (a dataset or table that happens to share the project's name is left alone). The legacy `project:dataset.table` form is not rewritten.
+- Configs contain only what you enter when building a no-code agent; table and column metadata isn't part of them. BigQuery Studio reads column descriptions directly from the referenced BigQuery tables, so keep descriptions on the tables in every environment (for example in the DDL, dbt or Terraform that creates them) rather than on the agent. Agent-level schema overrides, schema relationships and user functions aren't exported, and because configs are the source of truth, the deployer removes them from target agents.
 
 > [!IMPORTANT]
-> Treat Git as the single source of truth in pipeline-managed environments (STG, PRD). A deployment updates both `published_context` (used at runtime) and `staging_context` (rendered by the BigQuery Studio UI) to match the repository, so edits made directly in BigQuery Studio in target environments are overwritten. Make changes in DEV, publish and export them, and promote them through a pull request.
+> Treat Git as the single source of truth in pipeline-managed environments (STG, PRD). A deployment updates both `published_context` (used at runtime) and `staging_context` (rendered by the BigQuery Studio UI) to match the repository, so edits made directly in BigQuery Studio in target environments are detected as drift and reverted on the next run. An empty `display_name`, `description` or `labels` in a definition clears any value set by hand. Make changes in DEV, publish and export them, and promote them through a pull request.
 
 ### Adding an agent
 - **No-code:** publish the agent in BigQuery Studio, then export it:
@@ -134,8 +135,12 @@ Limitations:
   ```
   Leave `name` unset; the deployer fills it in from `AGENT_ID`, which follows the same rules as `agent_id`. If you don't set `staging_context`, the deployer copies `published_context` into it, as it does for JSON configs. Files starting with `_` are ignored, so you can use them for shared helpers.
 
-### Gemini Enterprise egress IAM (manual)
-This step is **not** in the pipeline. Run it only after you've added one or more Data Agents to a Gemini Enterprise app. Without it, GE calls to the agent fail with `403: Egress request is not authorized`.
+### Gemini Enterprise egress IAM (optional helper)
+
+> [!WARNING]
+> `deployer.ge_egress` is a **helper script for connecting agents to a Gemini Enterprise app**. It is **not part of the core deployer**: the pipeline never runs it, and it **isn't covered by the test suite**. Only a few small matching and policy-merge functions in `iam.py` have unit tests. The command itself and the IAM calls it makes (`iam.configure_egress`) are untested. Use it only when you need it, run `--dry-run` first, and review the bindings it reports before applying them.
+
+Run it only after you've added one or more Data Agents to a Gemini Enterprise app. Without it, GE calls to the agent fail with `403: Egress request is not authorized`.
 
 ```bash
 .venv/bin/python -m deployer.ge_egress --project_id=<PROJECT_ID> --dry-run    # show missing bindings
@@ -169,6 +174,16 @@ gcloud auth application-default login
 .venv/bin/python -m pytest -q
 .venv/bin/python -m deployer --project_id=<PROJECT_ID> --dry-run
 ```
+
+The test suite is fully offline. It needs no Google Cloud project, credentials or network access, so it runs the same in a fork, locally and in Cloud Build. Google Cloud APIs are replaced by in-memory fakes and `httpx.MockTransport`.
+- **Covered:** the core deployer, end to end:
+  - config and low-code loading and validation, cross-project rewriting
+  - drift detection and update requests
+  - the `python -m deployer` command (exit codes, dry-run, error isolation, Agent Registry sync)
+  - `python -m deployer.export_agent`
+- **Not covered:** the optional `deployer.ge_egress` helper (see above), and behaviour of the live APIs. Use a `--dry-run` against a real project to check the latter.
+- **Repo-content tests** validate whatever is in `agent_configs/` and `low_code_agents/`, and skip when those folders are empty, so deleting the samples doesn't break CI.
+
 To change dependencies, edit `requirements.in`, then run `uv pip compile requirements.in -o requirements.txt --python-version 3.11`.
 
 ---

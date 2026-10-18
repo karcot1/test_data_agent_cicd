@@ -29,6 +29,7 @@
   ],
   "options": {
     "python_enabled": false,
-    "model": "MODEL_UNSPECIFIED"
+    "model": "MODEL_UNSPECIFIED",
+    "max_billed_bytes": 0
   }
 }

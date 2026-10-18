@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Sequence
 
@@ -39,13 +40,21 @@ def display_name_for(agent_id: str) -> str:
     return f"{agent_id} [BQCA Agent]"[:MAX_NAME_LEN].rstrip()
 
 
-def find_service(services: list[dict], agent_id: str) -> dict | None:
-    """Match an existing registry service by its card URL or by service ID."""
-    url_suffix = f"/dataAgents/{agent_id}"
+def find_service(services: list[dict], agent_id: str, project_id: str) -> dict | None:
+    """Match an existing registry service by its card URL or by service ID.
+
+    A card URL only counts if it points at `agent_id` in `project_id` (any location),
+    so a service for another project's agent with the same ID is never overwritten.
+    The services listed are already scoped to the project, so a service-ID match is safe.
+    """
+    url_re = re.compile(
+        rf"/projects/{re.escape(project_id)}/locations/[^/]+/dataAgents/{re.escape(agent_id)}"
+        r"(?![A-Za-z0-9_-])"
+    )
     name_suffix = f"/services/{service_id_for(agent_id)}"
     for svc in services:
         svc_url = svc.get("agentSpec", {}).get("content", {}).get("url", "") or ""
-        if svc_url.endswith(url_suffix) or svc.get("name", "").endswith(name_suffix):
+        if url_re.search(svc_url) or svc.get("name", "").endswith(name_suffix):
             return svc
     return None
 
@@ -86,7 +95,7 @@ class AgentRegistry:
         return [
             loc
             for loc in self.registry_locations
-            if find_service(self.services(loc), agent_id) is None
+            if find_service(self.services(loc), agent_id, self.project_id) is None
         ]
 
     def _build_payload(
@@ -137,7 +146,7 @@ class AgentRegistry:
     ) -> None:
         payload = self._build_payload(agent_id, description, location=location)
         for reg_location in self.registry_locations:
-            existing = find_service(self.services(reg_location), agent_id)
+            existing = find_service(self.services(reg_location), agent_id, self.project_id)
             if existing:
                 print(f"    Agent Registry ({reg_location}): updating {existing['name']}")
                 resp = self.client.patch(

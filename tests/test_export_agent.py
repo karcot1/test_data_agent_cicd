@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 import pytest
+from google.api_core import exceptions
 from google.cloud import geminidataanalytics
 
-from deployer import specs
+from deployer import export_agent, specs
+from deployer.auth import AuthError
 from deployer.export_agent import ExportError, agent_to_config, default_agent_id, parse_source
 
 
@@ -52,7 +56,8 @@ def live_agent(tables=(("dev", "d", "t"),)):
                 ],
                 glossary_terms=[geminidataanalytics.GlossaryTerm(display_name="GMV", labels=["finance"])],
                 options=geminidataanalytics.ConversationOptions(
-                    model=geminidataanalytics.ConversationOptions.Model.LATEST_GA_MODEL
+                    model=geminidataanalytics.ConversationOptions.Model.LATEST_GA_MODEL,
+                    datasource=geminidataanalytics.DatasourceOptions(big_query_max_billed_bytes=5 * 10**9),
                 ),
             ),
         ),
@@ -77,7 +82,7 @@ def test_agent_to_config_exports_published_context_only():
             "parameters": [{"name": "n", "description": "", "data_type": "INT64"}],
         }],
         "glossary_terms": [{"display_name": "GMV", "description": "", "labels": ["finance"]}],
-        "options": {"python_enabled": False, "model": "LATEST_GA_MODEL"},
+        "options": {"python_enabled": False, "model": "LATEST_GA_MODEL", "max_billed_bytes": 5 * 10**9},
     }
 
 
@@ -94,6 +99,15 @@ def test_exported_config_round_trips_through_deployer():
     assert ctx.example_queries[0].sql_query == "SELECT SUM(x) FROM `prd.d.t`"
     assert ctx.glossary_terms[0].display_name == "GMV"
     assert ctx.options.model == geminidataanalytics.ConversationOptions.Model.LATEST_GA_MODEL
+    assert ctx.options.datasource.big_query_max_billed_bytes == 5 * 10**9
+
+
+@pytest.mark.parametrize("datasource", [None, geminidataanalytics.DatasourceOptions(),
+                                        geminidataanalytics.DatasourceOptions(big_query_max_billed_bytes=0)])
+def test_no_byte_limit_exports_as_zero(datasource):
+    agent = live_agent()
+    agent.data_analytics_agent.published_context.options.datasource = datasource
+    assert agent_to_config(agent, "sales_agent", "dev")["options"]["max_billed_bytes"] == 0
 
 
 def test_unpublished_agent_rejected():
@@ -127,3 +141,111 @@ def test_parse_source_accepts_name_or_url(source):
 def test_parse_source_rejects_garbage():
     with pytest.raises(ValueError):
         parse_source("not-a-resource")
+
+
+# ---------------------------------------------------------------- main()
+
+
+SOURCE = "projects/dev/locations/us/dataAgents/agent_123"
+
+
+class FakeClient:
+    def __init__(self, agent=None, error=None):
+        self.agent, self.error, self.requested = agent, error, []
+
+    def get_data_agent(self, name):
+        self.requested.append(name)
+        if self.error:
+            raise self.error
+        return self.agent
+
+
+@pytest.fixture
+def export(monkeypatch, capsys):
+    """Run export_agent.main() against a fake API; returns (exit_code, stdout, stderr, client)."""
+    state = {"client": FakeClient(live_agent()), "locations": []}
+
+    def fake_client(credentials, location):
+        state["locations"].append(location)
+        return state["client"]
+
+    monkeypatch.setattr(export_agent, "get_credentials", lambda: object())
+    monkeypatch.setattr(export_agent, "data_agent_client", fake_client)
+
+    def run(*argv, client=None):
+        if client is not None:
+            state["client"] = client
+        try:
+            export_agent.main(list(argv))
+            code = 0
+        except SystemExit as e:
+            code = e.code
+        out, err = capsys.readouterr()
+        return code, out, err, state
+
+    return run
+
+
+def test_main_writes_a_deployable_config(export, tmp_path):
+    out_path = tmp_path / "nested" / "dir" / "sales.json"  # parent directories are created
+    code, out, _, state = export("--source", SOURCE, "--out", str(out_path))
+
+    assert code == 0
+    assert state["locations"] == ["us"]  # regional endpoint for the source agent
+    assert state["client"].requested == [SOURCE]
+    config = json.loads(out_path.read_text())
+    assert config["agent_id"] == "sales_agent"  # derived from the display name "Sales Agent"
+    assert config["location"] == "us"
+    assert config["source_project_id"] == "dev"
+    assert "deploys as:      sales_agent (location: us)" in out
+    specs.parse_agent_config(config, str(out_path), "prd")  # the written file deploys as-is
+
+
+def test_main_accepts_a_card_url_and_agent_id_override(export, tmp_path):
+    out_path = tmp_path / "x.json"
+    url = "https://geminidataanalytics.us.rep.googleapis.com/v1/a2a/projects/dev/locations/US/dataAgents/agent_123/v1/card"
+    code, _, _, state = export("--source", url, "--out", str(out_path), "--agent_id", "custom_id")
+    assert code == 0
+    assert state["client"].requested == [SOURCE]  # location normalized to lower case
+    assert json.loads(out_path.read_text())["agent_id"] == "custom_id"
+
+
+def test_main_rejects_a_bad_source_with_exit_2(export, tmp_path):
+    code, _, err, state = export("--source", "not-a-resource", "--out", str(tmp_path / "x.json"))
+    assert code == 2
+    assert "must contain projects/" in err
+    assert state["locations"] == []  # never called the API
+    assert not (tmp_path / "x.json").exists()
+
+
+def test_main_unpublished_agent_exits_1_without_writing(export, tmp_path):
+    out_path = tmp_path / "x.json"
+    code, _, err, _ = export("--source", SOURCE, "--out", str(out_path), client=FakeClient(live_agent(tables=())))
+    assert code == 1
+    assert "not deployable" in err and "Publish the agent" in err
+    assert not out_path.exists()
+
+
+def test_main_invalid_agent_id_override_exits_1_without_writing(export, tmp_path):
+    out_path = tmp_path / "x.json"
+    code, _, err, _ = export("--source", SOURCE, "--out", str(out_path), "--agent_id", "Not Valid")
+    assert code == 1
+    assert "not deployable" in err
+    assert not out_path.exists()
+
+
+def test_main_api_error_exits_1(export, tmp_path):
+    client = FakeClient(error=exceptions.NotFound("agent not found"))
+    code, _, err, _ = export("--source", SOURCE, "--out", str(tmp_path / "x.json"), client=client)
+    assert code == 1
+    assert "Fetching Data Agent failed" in err
+
+
+def test_main_auth_error_exits_1(export, monkeypatch, tmp_path):
+    def no_credentials():
+        raise AuthError("No Google Cloud credentials found.")
+
+    monkeypatch.setattr(export_agent, "get_credentials", no_credentials)
+    code, _, err, _ = export("--source", SOURCE, "--out", str(tmp_path / "x.json"))
+    assert code == 1
+    assert "No Google Cloud credentials found." in err

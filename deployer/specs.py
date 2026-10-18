@@ -32,7 +32,8 @@ No-code agents are declarative JSON files in agent_configs/ (see agent_configs/_
          "parameters": [{"name": "...", "description": "...", "data_type": "..."}]}
       ],
       "glossary_terms": [{"display_name": "...", "description": "...", "labels": ["..."]}],
-      "options": {"python_enabled": false, "model": "MODEL_UNSPECIFIED"}
+      "options": {"python_enabled": false, "model": "MODEL_UNSPECIFIED",
+                  "max_billed_bytes": 0}             # 0 or omitted = no limit
     }
 
 When source_project_id is set and differs from the target project, every reference to
@@ -75,7 +76,7 @@ TABLE_KEYS = {"project_id", "dataset_id", "table_id"}
 EXAMPLE_QUERY_KEYS = {"natural_language_question", "sql_query", "parameters"}
 PARAMETER_KEYS = {"name", "description", "data_type"}
 GLOSSARY_TERM_KEYS = {"display_name", "description", "labels"}
-OPTION_KEYS = {"python_enabled", "model"}
+OPTION_KEYS = {"python_enabled", "model", "max_billed_bytes"}
 VALID_MODELS = {"MODEL_UNSPECIFIED", "LATEST_GA_MODEL"}
 
 
@@ -141,17 +142,22 @@ def _optional_str(obj: dict, key: str, where: str) -> str:
 
 
 def _project_rewriter(source_project_id: str | None, target_project_id: str):
-    """Return a function that rewrites `<source_project_id>.` references to the target project.
+    """Return a function that rewrites references to `source_project_id` to the target project.
 
-    Only the `project.dataset.table` form is rewritten; references that quote the
-    project on its own (`project`.dataset.table) or use the legacy project:dataset
-    form are left unchanged.
+    Handles `project.dataset.table`, the whole reference quoted (`project.dataset.table`)
+    and per-identifier quoting (`project`.`dataset`.`table`, which BigQuery Studio
+    generates). The source ID is only rewritten in the project position: not inside a
+    longer ID (e.g. "my-dev" in "team-my-dev") and not after a dot, where it would be a
+    dataset or table that happens to share the name. The legacy project:dataset form is
+    left unchanged.
     """
     if not source_project_id or source_project_id == target_project_id:
         return lambda text: text
-    # Don't match the source ID inside a longer project ID (e.g. "my-dev" in "team-my-dev").
-    pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(source_project_id)}\.")
-    return lambda text: pattern.sub(f"{target_project_id}.", text)
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_.\-])(?<!\.`)"  # start of an identifier, not a dataset/table position
+        rf"(`?){re.escape(source_project_id)}(`?)\."
+    )
+    return lambda text: pattern.sub(rf"\g<1>{target_project_id}\g<2>.", text)
 
 
 def parse_agent_config(data, source: str, project_id: str, location: str = "global") -> AgentSpec:
@@ -234,6 +240,15 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
     python_enabled = (options or {}).get("python_enabled", False)
     if not isinstance(python_enabled, bool):
         raise SpecError(f"'{source}': options.python_enabled must be true or false.")
+    max_billed_bytes = (options or {}).get("max_billed_bytes")
+    if max_billed_bytes is None:
+        max_billed_bytes = 0
+    # bool is a subclass of int in Python, so exclude it explicitly.
+    if isinstance(max_billed_bytes, bool) or not isinstance(max_billed_bytes, int) or max_billed_bytes < 0:
+        raise SpecError(
+            f"'{source}': options.max_billed_bytes must be a whole number of bytes, 0 or more "
+            f"(0 means no limit), got {max_billed_bytes!r}."
+        )
     model_name = (options or {}).get("model") or "MODEL_UNSPECIFIED"
     if not isinstance(model_name, str) or model_name not in VALID_MODELS:
         raise SpecError(
@@ -267,6 +282,12 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
                 python=geminidataanalytics.AnalysisOptions.Python(enabled=python_enabled)
             ),
             model=geminidataanalytics.ConversationOptions.Model[model_name],
+            # Only set when there is a limit; unset, {} and 0 all mean "no limit".
+            datasource=(
+                geminidataanalytics.DatasourceOptions(big_query_max_billed_bytes=max_billed_bytes)
+                if max_billed_bytes
+                else None
+            ),
         ),
     )
     data_agent = geminidataanalytics.DataAgent(
