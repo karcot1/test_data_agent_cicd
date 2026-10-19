@@ -42,6 +42,7 @@ This repository accompanies the Google Cloud Blog post [AgentOps for Conversatio
 ├── requirements.in                        # Top-level dependencies (edit this)
 ├── requirements.txt                       # Fully pinned lock file (generated from requirements.in)
 ├── pytest.ini                             # pytest configuration
+├── IAM_Mapping.md                         # IAM permissions and suggested roles per persona
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── .dockerignore
@@ -188,9 +189,9 @@ To change dependencies, edit `requirements.in`, then run `uv pip compile require
 
 ---
 
-## 📋 Prerequisites & Required IAM Permissions
+## 📋 Prerequisites
 
-### 1. Enable Required Google Cloud APIs
+### Enable Required Google Cloud APIs
 ```bash
 gcloud services enable \
     geminidataanalytics.googleapis.com \
@@ -207,28 +208,11 @@ The pipeline pushes its image to an Artifact Registry Docker repository named `a
 gcloud artifacts repositories create agent-repo --repository-format=docker --location=us
 ```
 
-### 2. Required IAM Permissions
+---
 
-| Who | Role(s) | Where | Why |
-| :--- | :--- | :--- | :--- |
-| **Cloud Build service account**<br>(the account the trigger runs as, e.g. `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`) | `roles/geminidataanalytics.dataAgentEditor`<br>*(or `roles/geminidataanalytics.admin`)* | Deployment project | Create, read and update Data Agents. |
-| | `roles/agentregistry.editor`<br>*(or `roles/agentregistry.admin`)* | Deployment project | List, create and update Agent Registry services. |
-| | `roles/artifactregistry.writer` | `agent-repo` repository | Push the deployer image. |
-| | `roles/logging.logWriter` | Deployment project | Write build logs (`CLOUD_LOGGING_ONLY`). |
-| | `roles/bigquery.dataViewer` | Datasets the agents reference | The API checks that every referenced table exists when it creates or updates an agent. |
-| **Pull-request (plan) trigger service account**<br>(a separate, read-only account; see [Securing the pull-request trigger](#securing-the-pull-request-trigger)) | `roles/geminidataanalytics.dataAgentViewer` | Deployment project | Read live Data Agents to compute the plan. |
-| | `roles/agentregistry.viewer` | Deployment project | Check which agents are already registered. |
-| | `roles/artifactregistry.reader` | `agent-repo` repository | Pull the cached deployer image. |
-| | `roles/logging.logWriter` | Deployment project | Write build logs. |
-| **Person running `deployer.export_agent`** | `roles/geminidataanalytics.dataAgentViewer` | Project that owns the source agent | Read the Data Agent definition from the API. |
-| **Person running `deployer.ge_egress`** | `roles/discoveryengine.viewer` | Deployment project | List Gemini Enterprise apps and agents. |
-| | Permission to update IAM, e.g. `roles/iam.securityAdmin` | Deployment project | Add the IAP egress bindings on the project and `iap_web`. |
-| **Anyone (or any agent identity) chatting with a Data Agent** | `roles/geminidataanalytics.dataAgentUser`, `roles/cloudaicompanion.user` | Deployment project | Chat with the Data Agent. |
-| | `roles/bigquery.jobUser` | Deployment project | Run the SQL the agent generates. |
-| | `roles/bigquery.dataViewer` | Every project that owns a table the agent references | Read table metadata and data. Gemini Data Analytics queries with the caller's identity. |
+## 🔐 IAM Permissioning
 
-> [!CAUTION]
-> Don't grant the Cloud Build service account broad IAM-admin roles (such as `roles/iam.securityAdmin`) just for this pipeline. The pipeline doesn't change IAM. The egress bindings are applied manually with `deployer.ge_egress`.
+See [IAM_Mapping.md](IAM_Mapping.md) for the individual permissions each persona needs (Platform Admin, Agent Author, CI/CD service account and End User), why each one is needed, and suggested native and custom roles.
 
 ---
 
@@ -252,7 +236,7 @@ Other substitutions:
 
 ### Securing the pull-request trigger
 A pull-request build runs the code **from the pull request**: its `cloudbuild.yaml`, its tests and its `low_code_agents/` modules. Anyone who opens a pull request can change those files, including removing `--dry-run`. So `--dry-run` is not a security boundary. What a PR build can do is limited by how the trigger is configured in Google Cloud, which a pull request can't change:
-- **Run it as a separate, read-only service account** (roles in [Required IAM Permissions](#2-required-iam-permissions)). Even a malicious build then can't create or modify agents, or push the image.
+- **Run it as a separate, read-only service account** (see [IAM_Mapping.md](IAM_Mapping.md#3-cicd-service-account-plan-and-deploy)). Even a malicious build then can't create or modify agents, or push the image.
 - **Require a maintainer to comment `/gcbrun`** on the pull request before the build runs (comment control).
 - **Protect `main`** with required reviews, since the deploy trigger runs whatever is merged with the deploy service account.
 
@@ -286,13 +270,13 @@ gcloud builds submit --config cloudbuild.yaml .
 | **Deployer stops with `Invalid agent definition: ...`** | The config has invalid JSON, an unknown key, an invalid `agent_id`, or no `table_references`. | Fix the field named in the message. Compare with [`agent_configs/_template.json`](agent_configs/_template.json). |
 | **`Exported agent is not deployable: ... has no published BigQuery table references`** | The agent was never published, or it uses a data source other than BigQuery tables. | Publish the agent in BigQuery Studio and export it again. |
 | **`403: Read access to project ... was denied`** for an agent in `us` or `eu` | Agents outside `global` are only served by their regional endpoint (e.g. `geminidataanalytics.us.rep.googleapis.com`). | Handled in `deployer/endpoints.py`. Pass `--location` to the deployer and the agent's full resource name to `deployer.export_agent`. |
-| **`[CREATE]` or `[MODIFY]` fails with `403`/`404` on a table** | A referenced table doesn't exist in the target project, or the Cloud Build service account can't read it. | Create the same datasets and tables in every environment, and grant `roles/bigquery.dataViewer` on them. |
-| **`403: Egress request is not authorized`** when using the agent from Gemini Enterprise | The GE agent's identity is missing the IAP egress permissions checked by the agent gateway (`iap.resources.egressViaIAP`, part of `roles/iap.viewer`). | Run `python -m deployer.ge_egress --project_id=<PROJECT_ID>` after adding the agent to the GE app. |
+| **`[CREATE]` or `[MODIFY]` fails with `403`/`404` on a table** | A referenced table doesn't exist in the target project, or the Cloud Build service account can't read it. | Create the same datasets and tables in every environment, and give the service account read access as described in [IAM_Mapping.md](IAM_Mapping.md#3-cicd-service-account-plan-and-deploy). |
+| **`403: Egress request is not authorized`** when using the agent from Gemini Enterprise | The GE agent's identity is missing the IAP egress access checked by the agent gateway. | Run `python -m deployer.ge_egress --project_id=<PROJECT_ID>` after adding the agent to the GE app. |
 | **`409 Resource 'projects/.../locations/global/dataAgents/<id>' already exists`** *(even after deleting the agent)* | Gemini Data Analytics **soft-deletes** `DataAgent` resources and keeps the ID for **30 days**. | Handled automatically: on `AlreadyExists` the deployer calls `update_data_agent()` instead (`deployer/reconcile.py`). |
 | **Agent registration returns `200 OK`, but the agent doesn't appear in the Agent Registry UI** | `POST /services` returns a long-running operation that can fail later, e.g. because another service already owns the same interface URL. Missing `name` / `description` / `version` / `url` in `agentSpec.content` also causes failures. | Handled in `deployer/registry.py`: it matches existing services by `url` or `serviceId`, `PATCH`es them instead of creating duplicates, fills required card fields, and polls the operation until it finishes. |
 | **`400 Bad Request` from `agentregistry.googleapis.com/.../services?serviceId=...`** | Agent Registry limits `serviceId` and `displayName` to **63 characters**. | Handled in `deployer/registry.py`, which truncates both to 63 characters. |
 | **`no compatible transports found`** when an `a2a-sdk` client loads the registered card | Gemini Data Analytics returns `"preferredTransport": "HTTP_JSON"`, but `a2a-sdk` 1.x expects `"HTTP+JSON"`. | Handled in `deployer/registry.py`, which normalizes `preferredTransport` to `HTTP+JSON` before registering. |
-| **`403 Forbidden` on `.../dataAgents/<id>/v1/message:send`** | The calling identity lacks permission to chat with the agent or to query its tables. | Grant the caller the roles in the "Anyone chatting with a Data Agent" rows above, including `roles/bigquery.dataViewer` on every project that owns a referenced table. Send the `x-goog-user-project` header on A2A requests. |
+| **`403 Forbidden` on `.../dataAgents/<id>/v1/message:send`** | The calling identity lacks permission to chat with the agent or to query its tables. | Grant the caller the End User permissions in [IAM_Mapping.md](IAM_Mapping.md#4-end-user-bigquery-only). Send the `x-goog-user-project` header on A2A requests. |
 
 ---
 
