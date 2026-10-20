@@ -75,10 +75,10 @@ def agent_to_config(
 ) -> dict:
     """Convert a live DataAgent into the agent_configs/ JSON schema.
 
-    Only the published context is exported, and server-populated fields (table
-    schemas, timestamps, the staging context) are dropped. Settings the schema
-    doesn't cover, such as table and column descriptions or schema relationships,
-    are not exported.
+    Only the published context is exported, and server-managed fields (timestamps,
+    last_published_context) and the staging context are dropped. Settings the
+    schema doesn't cover, such as agent-level table and column schema overrides,
+    schema relationships or user functions, are not exported.
     """
     ctx = agent.data_analytics_agent.published_context
     if not ctx.datasource_references.bq.table_references:

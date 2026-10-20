@@ -240,6 +240,7 @@ def test_null_optional_strings_become_empty():
     ({"options": {"python_enabled": "yes"}}, "true or false"),
     ({"options": {"model": "GPT_4"}}, "options.model must be one of"),
     ({"options": {"max_billed_bytes": -1}}, "max_billed_bytes must be a whole number"),
+    ({"options": {"max_billed_bytes": 2**63}}, "max_billed_bytes must be a whole number"),
     ({"options": {"max_billed_bytes": "1000"}}, "max_billed_bytes must be a whole number"),
     ({"options": {"max_billed_bytes": 1.5}}, "max_billed_bytes must be a whole number"),
     ({"options": {"max_billed_bytes": True}}, "max_billed_bytes must be a whole number"),

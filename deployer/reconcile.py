@@ -47,6 +47,7 @@ def _normalized(ctx: geminidataanalytics.Context):
     src = geminidataanalytics.Context.pb(ctx)
     pb = type(src)()
     pb.CopyFrom(src)
+    pb.DiscardUnknownFields()
     pb.system_instruction = pb.system_instruction.strip()
     for q in pb.example_queries:
         q.natural_language_question = q.natural_language_question.strip()

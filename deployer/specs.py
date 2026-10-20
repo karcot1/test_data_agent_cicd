@@ -244,7 +244,11 @@ def parse_agent_config(data, source: str, project_id: str, location: str = "glob
     if max_billed_bytes is None:
         max_billed_bytes = 0
     # bool is a subclass of int in Python, so exclude it explicitly.
-    if isinstance(max_billed_bytes, bool) or not isinstance(max_billed_bytes, int) or max_billed_bytes < 0:
+    if (
+        isinstance(max_billed_bytes, bool)
+        or not isinstance(max_billed_bytes, int)
+        or not (0 <= max_billed_bytes <= 2**63 - 1)
+    ):
         raise SpecError(
             f"'{source}': options.max_billed_bytes must be a whole number of bytes, 0 or more "
             f"(0 means no limit), got {max_billed_bytes!r}."

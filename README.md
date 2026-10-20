@@ -117,7 +117,7 @@ Limitations:
       --source projects/<SOURCE_PROJECT>/locations/<LOCATION>/dataAgents/<AGENT_ID> \
       --out agent_configs/<anything>.json [--agent_id my_agent]
   ```
-  `--source` also accepts the agent card's `url`. By default the agent deploys under an ID derived from its display name (`"My Sales Agent"` → `my_sales_agent`); use `--agent_id` to choose another. The exporter reads the Data Agent resource (`GetDataAgent`), keeps only the published context and drops server-populated fields such as table schemas.
+  `--source` also accepts the agent card's `url`. By default the agent deploys under an ID derived from its display name (`"My Sales Agent"` → `my_sales_agent`); use `--agent_id` to choose another. The exporter reads the Data Agent resource (`GetDataAgent`), keeps only the published context, and drops server-managed fields, the staging draft, and settings the config schema doesn't cover (such as agent-level table schemas).
   > **Why not the A2A agent card?** A2A agent cards (from the BigQuery UI or `.../v1/card`) describe how to *call* an agent. They no longer include its tables, instructions or example queries, so they can't be used to recreate it. The deployer still uses the live card to register the agent in Agent Registry.
 - You can also write or edit a config by hand, starting from [`_template.json`](agent_configs/_template.json).
 - **Low-code:** add `low_code_agents/<anything>.py` defining:
@@ -156,7 +156,7 @@ What it does:
    - `roles/iap.viewer` and `roles/iap.egressor` on the project
    - `roles/iap.egressor` on `iap_web`
 
-It only adds members and never removes any.
+It only adds members and never removes any. To run `deployer.ge_egress`, the caller needs `roles/discoveryengine.viewer`, `roles/resourcemanager.projectIamAdmin` and `roles/iap.admin` on the project (plus `roles/serviceusage.serviceUsageConsumer` on the quota project).
 
 ### Testing an agent manually
 [examples/deploy_a2a.py](examples/deploy_a2a.py) fetches a Data Agent's A2A card and sends it one message over A2A:

@@ -185,7 +185,7 @@ No-code agents are published here; skip this section with `--skip-registry`.
 
 ## 4. End User (BigQuery only)
 
-The user chats with a promoted agent in BigQuery Studio, or with the Conversational Analytics API from their own identity. **The agent uses the user's own permissions**: without access to the source tables, chats fail with `Schema_Resolution: Access Denied`.
+The user chats with a promoted agent in BigQuery Studio, or with the Conversational Analytics API from their own identity. **The agent uses the user's own permissions**: without access to the source tables, chats fail with `Schema_Resolution: Access Denied`. (Direct A2A calls to `…/dataAgents/<id>/v1/message:send` check the same Data Agent and BigQuery permissions below, plus `serviceusage.services.use` on the quota project passed in `x-goog-user-project`.)
 
 ### 4a. Agent access
 

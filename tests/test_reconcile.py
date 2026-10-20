@@ -243,6 +243,24 @@ def test_server_managed_fields_ignored():
     assert rc.diff_data_agent(live, make_agent()) == []
 
 
+def test_unknown_protobuf_fields_in_context_ignored():
+    """Fields added by a newer server version than the pinned SDK must not cause a perpetual MODIFY."""
+    live = make_agent()
+    # Tag 99999 (varint = 1) inside Context.options (field 3 on Context, length-delimited).
+    unknown_tag = (99999 << 3) | 0
+    tag_bytes = []
+    v = unknown_tag
+    while v >= 0x80:
+        tag_bytes.append((v & 0x7F) | 0x80)
+        v >>= 7
+    tag_bytes.append(v)
+    wire_Unknown = bytes(tag_bytes + [1])
+    for ctx in (live.data_analytics_agent.published_context, live.data_analytics_agent.staging_context):
+        pb = geminidataanalytics.Context.pb(ctx)
+        pb.options.MergeFromString(wire_Unknown)
+    assert rc.diff_data_agent(live, make_agent()) == []
+
+
 def test_diff_does_not_mutate_inputs():
     live, desired = make_agent(instruction=" inst "), make_agent()
     rc.diff_data_agent(live, desired)
