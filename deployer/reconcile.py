@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Compare desired agent specs with live Data Agents and create/update only what changed."""
 
 from __future__ import annotations
@@ -25,22 +39,76 @@ class Result:
     error: str | None = None
 
 
-def _tables(ctx) -> list[tuple[str, str, str]]:
-    return [
-        (t.project_id, t.dataset_id, t.table_id)
-        for t in ctx.datasource_references.bq.table_references
-    ]
+def _normalized(ctx: geminidataanalytics.Context):
+    """Raw protobuf copy of `ctx` with surrounding whitespace trimmed from free-text fields.
+
+    Trimming avoids a perpetual MODIFY if the API normalizes whitespace.
+    """
+    src = geminidataanalytics.Context.pb(ctx)
+    pb = type(src)()
+    pb.CopyFrom(src)
+    pb.DiscardUnknownFields()
+    pb.system_instruction = pb.system_instruction.strip()
+    for q in pb.example_queries:
+        q.natural_language_question = q.natural_language_question.strip()
+        q.sql_query = q.sql_query.strip()
+    for g in pb.glossary_terms:
+        g.display_name = g.display_name.strip()
+        g.description = g.description.strip()
+    # BigQuery Studio stores "no limit" as an empty datasource ({}) or a limit of 0;
+    # treat both like an unset field.
+    if not pb.options.datasource.big_query_max_billed_bytes.value:
+        pb.options.ClearField("datasource")
+    return pb
 
 
-def _examples(ctx) -> list[tuple]:
-    return [
-        (
-            q.natural_language_question.strip(),
-            q.sql_query.strip(),
-            [(p.name, p.description, p.data_type) for p in q.parameters],
-        )
-        for q in ctx.example_queries
-    ]
+def _table_ids(pb) -> list[tuple[str, str, str]]:
+    return [(t.project_id, t.dataset_id, t.table_id) for t in pb.datasource_references.bq.table_references]
+
+
+def _context_diff(existing_ctx, desired_ctx) -> list[str]:
+    """Names of every Context field that differs.
+
+    Configs are the complete source of truth, so every field counts, including ones
+    the config format can't express (schema relationships, user functions, table
+    schema metadata, Looker/Studio sources): those must be empty in the target.
+    The broad `datasource_references` and `options` fields are reported by their
+    more specific parts where possible.
+    """
+    existing, desired = _normalized(existing_ctx), _normalized(desired_ctx)
+    changed: list[str] = []
+    for field in geminidataanalytics.Context.pb().DESCRIPTOR.fields:
+        name = field.name
+        if getattr(existing, name) == getattr(desired, name):
+            continue
+        if name == "datasource_references":
+            e, d = existing.datasource_references, desired.datasource_references
+            if _table_ids(existing) != _table_ids(desired):
+                changed.append("table_references")
+            elif e.bq != d.bq:
+                changed.append("table_schema")
+            if e.studio != d.studio or e.looker != d.looker:
+                changed.append("datasource_references")
+        elif name == "options":
+            e, d = existing.options, desired.options
+            if e.analysis.python.enabled != d.analysis.python.enabled:
+                changed.append("python_enabled")
+            if e.model != d.model:
+                changed.append("model")
+            if e.datasource != d.datasource:
+                changed.append("max_billed_bytes")
+            rest_e, rest_d = type(e)(), type(d)()
+            rest_e.CopyFrom(e)
+            rest_d.CopyFrom(d)
+            for msg in (rest_e, rest_d):
+                msg.analysis.python.ClearField("enabled")
+                msg.ClearField("model")
+                msg.ClearField("datasource")
+            if rest_e != rest_d:
+                changed.append("options")
+        else:
+            changed.append(name)
+    return changed
 
 
 def diff_data_agent(
@@ -49,43 +117,48 @@ def diff_data_agent(
 ) -> list[str]:
     """Return the names of fields that differ between the live and desired agent.
 
-    display_name / description are only compared when the desired agent sets them,
-    so definitions that leave them blank don't overwrite values set elsewhere.
+    The desired agent is the complete source of truth: an empty display_name,
+    description or label set in the definition means the live value must be empty
+    too. Server-managed fields (timestamps, last_published_context, kms_key) are
+    ignored.
     """
     changed: list[str] = []
 
     if existing.delete_time:
         changed.append("delete_time (soft-deleted)")
 
-    if desired.display_name and existing.display_name != desired.display_name:
+    if existing.display_name != desired.display_name:
         changed.append("display_name")
 
-    if desired.description and existing.description != desired.description:
+    if existing.description != desired.description:
         changed.append("description")
 
-    existing_ctx = existing.data_analytics_agent.published_context
-    desired_ctx = desired.data_analytics_agent.published_context
+    if dict(existing.labels) != dict(desired.labels):
+        changed.append("labels")
 
-    if existing_ctx.system_instruction.strip() != desired_ctx.system_instruction.strip():
-        changed.append("system_instruction")
+    existing_agent = existing.data_analytics_agent
+    desired_agent = desired.data_analytics_agent
+    changed += _context_diff(existing_agent.published_context, desired_agent.published_context)
 
-    if _tables(existing_ctx) != _tables(desired_ctx):
-        changed.append("table_references")
-
-    if _examples(existing_ctx) != _examples(desired_ctx):
-        changed.append("example_queries")
+    # staging_context is what BigQuery Studio displays; keep it identical to the deployed spec.
+    if _context_diff(existing_agent.staging_context, desired_agent.staging_context):
+        changed.append("staging_context")
 
     return changed
 
 
-def update_mask_for(desired: geminidataanalytics.DataAgent) -> field_mask_pb2.FieldMask:
-    paths = []
-    if desired.display_name:
-        paths.append("display_name")
-    if desired.description:
-        paths.append("description")
-    paths.append("data_analytics_agent")
-    return field_mask_pb2.FieldMask(paths=paths)
+# Every field the deployer owns is always written, so unset values clear drift.
+UPDATE_MASK_PATHS = (
+    "display_name",
+    "description",
+    "labels",
+    "data_analytics_agent.published_context",
+    "data_analytics_agent.staging_context",
+)
+
+
+def update_mask_for(desired: geminidataanalytics.DataAgent | None = None) -> field_mask_pb2.FieldMask:
+    return field_mask_pb2.FieldMask(paths=list(UPDATE_MASK_PATHS))
 
 
 def _update(client, desired: geminidataanalytics.DataAgent) -> None:

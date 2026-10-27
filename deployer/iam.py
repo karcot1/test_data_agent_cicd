@@ -1,8 +1,26 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Grant Gemini Enterprise agent identities the IAP egress roles needed to call Data Agents."""
 
 from __future__ import annotations
 
+import re
+
 import httpx
+
+from deployer.registry import display_name_for
 
 DISCOVERY_API = "https://discoveryengine.googleapis.com/v1alpha"
 CRM_API = "https://cloudresourcemanager.googleapis.com/v1"
@@ -14,15 +32,26 @@ PROJECT_ROLES = ("roles/iap.viewer", "roles/iap.egressor")
 IAP_WEB_ROLES = ("roles/iap.egressor",)
 
 
-def matches_agent(ge_agent: dict, agent_ids: set[str]) -> bool:
-    display_name = ge_agent.get("displayName", "")
+def matches_agent(ge_agent: dict, agent_ids: set[str], projects: set[str]) -> bool:
+    """True if a Gemini Enterprise agent fronts one of `agent_ids` in one of `projects`.
+
+    `projects` holds the project ID and number, since card URLs may use either. When
+    the GE agent has an A2A card, only its exact Data Agent URL counts; otherwise the
+    display name must match exactly.
+    """
     card_raw = ge_agent.get("a2aAgentDefinition", {}).get("jsonAgentCard", "")
-    return any(
-        display_name == agent_id
-        or display_name.startswith(f"{agent_id} ")
-        or f"/dataAgents/{agent_id}" in card_raw
-        for agent_id in agent_ids
-    )
+    if card_raw:
+        project_re = "|".join(re.escape(p) for p in projects)
+        return any(
+            re.search(
+                rf"/projects/(?:{project_re})/locations/[^/]+/dataAgents/{re.escape(agent_id)}"
+                r"(?![A-Za-z0-9_-])",
+                card_raw,
+            )
+            for agent_id in agent_ids
+        )
+    display_name = ge_agent.get("displayName", "")
+    return any(display_name in (agent_id, display_name_for(agent_id)) for agent_id in agent_ids)
 
 
 def missing_members(policy: dict, roles_to_members: dict[str, set[str]]) -> dict[str, set[str]]:
@@ -59,7 +88,10 @@ def ensure_bindings(
     roles_to_members: dict[str, set[str]],
     dry_run: bool = False,
 ) -> dict[str, set[str]]:
-    resp = client.post(f"{resource_url}:getIamPolicy", json={})
+    # Version 3 is required to read and write policies that contain conditional bindings.
+    resp = client.post(
+        f"{resource_url}:getIamPolicy", json={"options": {"requestedPolicyVersion": 3}}
+    )
     resp.raise_for_status()
     policy = resp.json()
 
@@ -72,9 +104,9 @@ def ensure_bindings(
         verb = "would add" if dry_run else "adding"
         print(f"    [MODIFY] {verb} {len(members)} member(s) to {role} on {resource_url}")
     if not dry_run:
-        set_resp = client.post(
-            f"{resource_url}:setIamPolicy", json={"policy": add_members(policy, missing)}
-        )
+        policy = add_members(policy, missing)
+        policy["version"] = 3
+        set_resp = client.post(f"{resource_url}:setIamPolicy", json={"policy": policy})
         if set_resp.status_code >= 400:
             raise RuntimeError(
                 f"setIamPolicy failed ({set_resp.status_code}) on {resource_url}: {set_resp.text}"
@@ -82,21 +114,37 @@ def ensure_bindings(
     return missing
 
 
-def discover_principals(client: httpx.Client, project_number: str, agent_ids: set[str]) -> set[str]:
-    engines_resp = client.get(
+def _list_all(client: httpx.Client, url: str, key: str) -> list[dict]:
+    """GET every page of a Discovery Engine list call."""
+    items: list[dict] = []
+    params: dict[str, str] = {}
+    while True:
+        resp = client.get(url, params=params)
+        resp.raise_for_status()
+        body = resp.json()
+        items += body.get(key, [])
+        if not body.get("nextPageToken"):
+            return items
+        params = {"pageToken": body["nextPageToken"]}
+
+
+def discover_principals(
+    client: httpx.Client, project_id: str, project_number: str, agent_ids: set[str]
+) -> set[str]:
+    engines = _list_all(
+        client,
         f"{DISCOVERY_API}/projects/{project_number}/locations/global"
-        "/collections/default_collection/engines"
+        "/collections/default_collection/engines",
+        "engines",
     )
-    engines_resp.raise_for_status()
 
     principals: set[str] = set()
-    for engine in engines_resp.json().get("engines", []):
-        agents_resp = client.get(
-            f"{DISCOVERY_API}/{engine['name']}/assistants/default_assistant/agents"
+    for engine in engines:
+        ge_agents = _list_all(
+            client, f"{DISCOVERY_API}/{engine['name']}/assistants/default_assistant/agents", "agents"
         )
-        agents_resp.raise_for_status()
-        for ge_agent in agents_resp.json().get("agents", []):
-            if not matches_agent(ge_agent, agent_ids):
+        for ge_agent in ge_agents:
+            if not matches_agent(ge_agent, agent_ids, {project_id, project_number}):
                 continue
             spiffe = ge_agent.get("agentIdentityInfo", {}).get("spiffeId", "")
             if spiffe.startswith("//"):
@@ -112,7 +160,7 @@ def configure_egress(
     proj_resp.raise_for_status()
     project_number = str(proj_resp.json()["projectNumber"])
 
-    principals = discover_principals(client, project_number, agent_ids)
+    principals = discover_principals(client, project_id, project_number, agent_ids)
     if not principals:
         print("    No matching agents registered in Gemini Enterprise yet; nothing to bind.")
         return
